@@ -45,6 +45,8 @@
 
 无需自己编译，也不需要另外安装 .NET。
 
+已有 .NET 8 桌面运行时（x64）的电脑可选择 **[轻量版便携包](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch-lite-win-x64.zip)**（约3.2 MB），或[轻量版单独程序](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch-lite.exe)（约8.1 MB）。轻量版不包含运行环境和虚拟显示驱动，功能代码与完整版一致，详见[轻量版使用说明](docs/轻量版使用说明.md)。
+
 - **推荐：[下载完整便携包](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch-win-x64.zip)**：包含程序、安装与恢复入口、可选虚拟显示驱动、中文说明和第三方许可。
 - [单独下载可执行程序](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch.exe)：适合已有可用外接屏或已经安装虚拟显示驱动的电脑。
 - [查看版本发布页](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest)。
