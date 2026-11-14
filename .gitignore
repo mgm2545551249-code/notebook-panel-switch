@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+.vs/
+.vscode/
+work/
+outputs/
+artifacts/
+*.user
+*.suo
+*.pdb
+*.log
+*.jsonl
+恢复记录.json
+设置.json
+电源键策略备份.json
