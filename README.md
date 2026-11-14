@@ -15,6 +15,18 @@
 
 软件不使用黑色遮罩、不屏蔽普通键鼠，也不反复发送关屏命令。
 
+## 直接下载使用
+
+无需自己编译，也不需要另外安装 .NET。
+
+- **推荐：[下载完整便携包](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch-win-x64.zip)**：包含程序、安装与恢复入口、可选虚拟显示驱动、中文说明和第三方许可。
+- [单独下载可执行程序](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest/download/PanelSwitch.exe)：适合已有可用外接屏或已经安装虚拟显示驱动的电脑。
+- [查看版本发布页](https://github.com/mgm2545551249-code/notebook-panel-switch/releases/latest)。
+
+完整便携包下载后，先解压整个文件夹，再运行 `PanelSwitch.exe`。需要开始菜单入口时运行 `安装.cmd`。不要在压缩包内直接运行程序。仅使用笔记本内屏时，可在设置中点击“安装虚拟显示驱动”；该步骤及实体电源键代理需要管理员权限。
+
+适用于 Windows x64。不同电脑的固件、显卡驱动和按钮实现存在差异，首次使用应先执行十五秒关屏测试。
+
 ## 构建和运行
 
 需要 Windows 及 .NET 8 SDK。在仓库根目录执行：
