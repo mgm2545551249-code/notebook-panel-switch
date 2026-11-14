@@ -26,27 +26,39 @@ internal sealed class MainWindow:Window {
     readonly CheckBox awake=new(){Content="关屏期间保持后台运行",Margin=new Thickness(0,8,0,0)};
     readonly CheckBox virtualDisplay=new(){Content="允许使用已安装的虚拟显示器维持单内屏关屏",Margin=new Thickness(0,8,0,0)};
     readonly CheckBox powerButton=new(){Content="启用实体电源键控制（需要管理员代理）",Margin=new Thickness(0,8,0,0),IsEnabled=false};
-    readonly Button toggle; Hotkey? hotkey;PowerButton? buttonInput;HwndSource? source;
+    readonly Border hero; readonly TextBlock stateBadge=new(){FontSize=12,FontWeight=FontWeights.SemiBold}; readonly Button toggle; Hotkey? hotkey;PowerButton? buttonInput;HwndSource? source;
     uint nextModifiers,nextKey;bool exiting,ticking;IntPtr powerNotification;DateTime lastButton;
     readonly bool smoke,background;PowerAgentClient? powerAgent;bool startingAgent;
     public MainWindow(bool smoke=false,bool background=false) {
         this.smoke=smoke;this.background=background;controller=new(settings);
-        Title="内屏开关";Width=820;Height=750;MinWidth=680;MinHeight=600;
-        Background=new SolidColorBrush(Color.FromRgb(245,247,250));FontFamily=new FontFamily("Microsoft YaHei UI");FontSize=14;
-        var scroll=new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Content=scroll;
-        var root=new StackPanel{Margin=new Thickness(26)};scroll.Content=root;
-        root.Children.Add(new TextBlock{Text="内屏开关",FontSize=16,Foreground=Brushes.SlateGray,Margin=new Thickness(0,0,0,16)});
-        root.Children.Add(state);root.Children.Add(status);
-        var actions=new WrapPanel();root.Children.Add(actions);
-        toggle=Button("切换内屏",async()=>await controller.Toggle());actions.Children.Add(toggle);
-        actions.Children.Add(Button("十五秒独立关屏测试",async()=>await controller.Toggle(15)));
+        Title="内屏开关";Width=860;Height=900;MinWidth=700;MinHeight=650;
+        Background=Brush("#F3F7FA");Foreground=Brush("#19384B");FontFamily=new FontFamily("Microsoft YaHei UI");FontSize=14;
+        Resources.MergedDictionaries.Add(new ResourceDictionary{Source=new Uri("/PanelSwitch;component/Theme.xaml",UriKind.Relative)});
+        Icon=new System.Windows.Media.Imaging.BitmapImage(new Uri("pack://application:,,,/Assets/app.png"));
+        var scroll=new ScrollViewer{VerticalScrollBarVisibility=ScrollBarVisibility.Auto,HorizontalScrollBarVisibility=ScrollBarVisibility.Disabled};Content=scroll;
+        var root=new StackPanel{Margin=new Thickness(28,22,28,20)};scroll.Content=root;
+        var header=new Grid{Margin=new Thickness(0,0,0,22)};header.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});header.ColumnDefinitions.Add(new ColumnDefinition());
+        header.Children.Add(new Image{Source=Icon,Width=46,Height=46,Margin=new Thickness(0,0,12,0)});
+        var heading=new StackPanel{VerticalAlignment=VerticalAlignment.Center};Grid.SetColumn(heading,1);header.Children.Add(heading);
+        heading.Children.Add(new TextBlock{Text="内屏开关",FontSize=23,FontWeight=FontWeights.SemiBold});
+        heading.Children.Add(new TextBlock{Text="轻按一下，让屏幕休息",FontSize=12,Foreground=Brush("#728391"),Margin=new Thickness(0,3,0,0)});root.Children.Add(header);
+        var heroContent=new StackPanel();
+        var heroHeading=new Grid();heroHeading.ColumnDefinitions.Add(new ColumnDefinition());heroHeading.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        state.FontSize=30;state.Foreground=Brush("#163F47");heroHeading.Children.Add(state);
+        var badge=new Border{Background=Brush("#D3F0E7"),CornerRadius=new CornerRadius(12),Padding=new Thickness(12,5,12,5),VerticalAlignment=VerticalAlignment.Center,Child=stateBadge};Grid.SetColumn(badge,1);heroHeading.Children.Add(badge);heroContent.Children.Add(heroHeading);
+        status.Foreground=Brush("#52716F");status.Margin=new Thickness(0,10,0,18);heroContent.Children.Add(status);
+        var actions=new WrapPanel();heroContent.Children.Add(actions);
+        toggle=Button("关闭内屏",async()=>await controller.Toggle());toggle.Background=Brush("#128B86");toggle.Foreground=Brushes.White;toggle.BorderBrush=Brush("#128B86");toggle.MinWidth=130;actions.Children.Add(toggle);
+        var test=Button("测试关屏 · 15 秒",async()=>await controller.Toggle(15));test.ToolTip="关闭内屏，并在十五秒后自动恢复";actions.Children.Add(test);
         actions.Children.Add(Button("恢复内屏",async()=>{await controller.Restore();Recovery.RestorePending();controller.Refresh();}));
-        root.Children.Add(new Separator{Margin=new Thickness(0,14,0,14)});
-        root.Children.Add(new TextBlock{Text="控制设置",FontWeight=FontWeights.SemiBold,FontSize=17});
-        var keys=new WrapPanel{Margin=new Thickness(0,12,0,0)};keys.Children.Add(new TextBlock{Text="开关快捷键  ",VerticalAlignment=VerticalAlignment.Center});
-        nextModifiers=settings.Modifiers;nextKey=settings.VirtualKey;shortcut.Text=DescribeKey(nextModifiers,nextKey);
-        shortcut.PreviewKeyDown+=CaptureShortcut;keys.Children.Add(shortcut);
-        keys.Children.Add(Button("保存快捷键",()=>{hotkey!.Set(nextModifiers,nextKey);settings.Modifiers=nextModifiers;settings.VirtualKey=nextKey;Save();return Task.CompletedTask;}));root.Children.Add(keys);
+        heroContent.Children.Add(new TextBlock{Text="也可以短按电源键，或使用下方快捷键",FontSize=12,Foreground=Brush("#64837F"),Margin=new Thickness(0,5,0,0)});
+        hero=Card(heroContent,"#E6F4EF");root.Children.Add(hero);
+        var settingsPanel=new StackPanel();settingsPanel.Children.Add(SectionTitle("控制设置","选择你习惯的开关方式"));
+        var keys=new Grid{Margin=new Thickness(0,14,0,12)};keys.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});keys.ColumnDefinitions.Add(new ColumnDefinition());keys.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        keys.Children.Add(new TextBlock{Text="开关快捷键",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,18,0)});
+        nextModifiers=settings.Modifiers;nextKey=settings.VirtualKey;shortcut.Text=DescribeKey(nextModifiers,nextKey);shortcut.Margin=new Thickness(0,0,12,0);shortcut.FontSize=15;
+        shortcut.ToolTip="点击后按下新的组合键，再保存";shortcut.PreviewKeyDown+=CaptureShortcut;Grid.SetColumn(shortcut,1);keys.Children.Add(shortcut);
+        var save=Button("保存快捷键",()=>{hotkey!.Set(nextModifiers,nextKey);settings.Modifiers=nextModifiers;settings.VirtualKey=nextKey;Save();return Task.CompletedTask;});save.Margin=new Thickness(0);Grid.SetColumn(save,2);keys.Children.Add(save);settingsPanel.Children.Add(keys);
         startup.IsChecked=settings.StartWithWindows;awake.IsChecked=settings.KeepAwake;virtualDisplay.IsChecked=settings.AllowVirtualDisplay;
         startup.Click+=(_,_)=>Run(()=>{Install.SetStartup(startup.IsChecked==true);settings.StartWithWindows=startup.IsChecked==true;Save();});
         awake.Click+=(_,_)=>Run(()=>{settings.KeepAwake=awake.IsChecked==true;Save();if(controller.HasRecovery)Native.Awake(settings.KeepAwake);});
@@ -54,25 +66,36 @@ internal sealed class MainWindow:Window {
         powerButton.IsEnabled=true;
         powerButton.IsChecked=settings.EnablePowerButton;
         powerButton.Click+=async(_,_)=>await Execute(async()=>{if(powerButton.IsChecked==true)await StartPowerAgent();else if(powerAgent!=null){await powerAgent.DisposeAsync();powerAgent=null;}settings.EnablePowerButton=powerButton.IsChecked==true;Save();});
-        root.Children.Add(startup);root.Children.Add(awake);root.Children.Add(virtualDisplay);root.Children.Add(powerButton);
-        root.Children.Add(new TextBlock{Text="实体电源键使用系统 ACPI 按钮事件，需要管理员代理。运行期间短按策略暂设为不采取操作，退出后还原。",TextWrapping=TextWrapping.Wrap,FontSize=12,Foreground=Brushes.DimGray,Margin=new Thickness(0,8,0,0)});
-        root.Children.Add(new Separator{Margin=new Thickness(0,14,0,14)});
-        var tools=new WrapPanel();root.Children.Add(tools);
-        tools.Children.Add(Button("重新检测",RefreshDiagnostic));tools.Children.Add(Button("导出诊断",ExportDiagnostic));
+        AddSetting(settingsPanel,startup,"登录后自动运行","登录 Windows 后收进托盘，随时可用");
+        AddSetting(settingsPanel,awake,"关屏时保持电脑运行","后台任务继续运行，避免空闲自动睡眠");
+        AddSetting(settingsPanel,virtualDisplay,"单内屏模式","没有外接屏时，使用虚拟显示器维持关屏");
+        AddSetting(settingsPanel,powerButton,"实体电源键控制","短按切换屏幕，需要管理员代理；退出后还原原设置");
+        root.Children.Add(Card(settingsPanel));
+        var devicePanel=new StackPanel();var deviceTitle=new Grid();deviceTitle.ColumnDefinitions.Add(new ColumnDefinition());deviceTitle.ColumnDefinitions.Add(new ColumnDefinition{Width=GridLength.Auto});
+        deviceTitle.Children.Add(SectionTitle("设备状态","显示连接与控制能力"));var refresh=Button("重新检测",RefreshDiagnostic);refresh.Margin=new Thickness(0);Grid.SetColumn(refresh,1);deviceTitle.Children.Add(refresh);devicePanel.Children.Add(deviceTitle);
+        diagnostic.MinHeight=0;diagnostic.Height=94;diagnostic.BorderThickness=new Thickness(0);diagnostic.Background=Brushes.Transparent;diagnostic.Padding=new Thickness(0);diagnostic.Margin=new Thickness(0,14,0,0);diagnostic.FontSize=13;devicePanel.Children.Add(diagnostic);
+        root.Children.Add(Card(devicePanel));
+        var advanced=new StackPanel();var tools=new WrapPanel{Margin=new Thickness(0,14,0,0)};advanced.Children.Add(tools);
+        tools.Children.Add(Button("导出诊断",ExportDiagnostic));
         tools.Children.Add(Button("常规接口对照测试",async()=>{if(MessageBox.Show(this,"该对照测试会关闭所有屏幕，普通键鼠可能唤醒。十五秒后自动恢复。继续测试？","对照测试",MessageBoxButton.YesNo)==MessageBoxResult.Yes)await controller.Toggle(15,new BaselineBackend());}));
         tools.Children.Add(Button("安装虚拟显示驱动",InstallVirtual));
         tools.Children.Add(Button("打开日志目录",()=>{Directory.CreateDirectory(Storage.Root);Process.Start(new ProcessStartInfo("explorer.exe",Storage.Root){UseShellExecute=true});return Task.CompletedTask;}));
-        root.Children.Add(diagnostic);
-        root.Children.Add(new TextBlock{Text="关闭窗口后仍在托盘运行。退出时恢复内屏；独立恢复进程负责异常退出及测试超时恢复。",TextWrapping=TextWrapping.Wrap,Foreground=Brushes.DimGray,FontSize=12,Margin=new Thickness(0,12,0,0)});
+        advanced.Children.Add(new TextBlock{Text="诊断、驱动安装与对照测试仅在排查问题时使用。",Foreground=Brush("#728391"),FontSize=12,TextWrapping=TextWrapping.Wrap});
+        var expander=new Expander{Header="高级工具",Content=advanced,FontSize=14};root.Children.Add(Card(expander));
+        root.Children.Add(new TextBlock{Text="关闭窗口后仍在托盘运行 · 退出时自动恢复内屏",Foreground=Brush("#7A8B99"),FontSize=12,TextAlignment=TextAlignment.Center,Margin=new Thickness(0,5,0,0),TextWrapping=TextWrapping.Wrap});
         controller.Changed+=Update;
-        tray.Icon=System.Drawing.SystemIcons.Application;tray.Text="内屏开关";
+        using(var iconStream=typeof(MainWindow).Assembly.GetManifestResourceStream("PanelSwitch.Assets.app.ico")){tray.Icon=iconStream!=null?new System.Drawing.Icon(iconStream):System.Drawing.SystemIcons.Application;}tray.Text="内屏开关";
         var menu=new Forms.ContextMenuStrip();menu.Items.Add("切换内屏",null,async(_,_)=>await Execute(()=>controller.Toggle()));menu.Items.Add("显示设置",null,(_,_)=>ShowSettings());menu.Items.Add("恢复内屏",null,async(_,_)=>await Execute(controller.Restore));menu.Items.Add("退出并恢复",null,async(_,_)=>await Exit());
         tray.ContextMenuStrip=menu;tray.DoubleClick+=(_,_)=>ShowSettings();tray.Visible=true;
-        SourceInitialized+=InitializedWindow;Loaded+=async(_,_)=>{if(background)Hide();await RefreshDiagnostic();if(!smoke&&settings.EnablePowerButton)await Execute(StartPowerAgent);if(smoke){Storage.Save(Path.Combine(Storage.Root,"界面冒烟测试.json"),new{结果="通过",标题=Title,快捷键=shortcut.Text,状态=controller.State.ToString(),时间=DateTimeOffset.Now});await Exit();}};
+        SourceInitialized+=InitializedWindow;Loaded+=async(_,_)=>{if(background)Hide();await RefreshDiagnostic();scroll.ScrollToTop();if(!smoke&&settings.EnablePowerButton)await Execute(StartPowerAgent);if(smoke){Storage.Save(Path.Combine(Storage.Root,"界面冒烟测试.json"),new{结果="通过",标题=Title,快捷键=shortcut.Text,状态=controller.State.ToString(),时间=DateTimeOffset.Now});await Exit();}};
         timer.Tick+=async(_,_)=>{if(ticking)return;ticking=true;try{if(powerAgent!=null)await powerAgent.Pulse();await controller.Tick();}catch(Exception e){Storage.Log("恢复监视异常",e.ToString());}finally{ticking=false;}};timer.Start();
         Closing+=(_,e)=>{if(!exiting){e.Cancel=true;Hide();}};
-        Closed+=(_,_)=>{timer.Stop();hotkey?.Dispose();buttonInput?.Dispose();if(powerNotification!=IntPtr.Zero)Native.UnregisterPowerSettingNotification(powerNotification);source?.RemoveHook(Hook);tray.Dispose();};
+        Closed+=(_,_)=>{timer.Stop();hotkey?.Dispose();buttonInput?.Dispose();if(powerNotification!=IntPtr.Zero)Native.UnregisterPowerSettingNotification(powerNotification);source?.RemoveHook(Hook);tray.Icon?.Dispose();tray.Dispose();};
     }
+    static SolidColorBrush Brush(string color)=>(SolidColorBrush)new BrushConverter().ConvertFromString(color)!;
+    static Border Card(UIElement child,string background="#FFFFFF")=>new(){Child=child,Background=Brush(background),BorderBrush=Brush("#E2EAF0"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(18),Padding=new Thickness(22),Margin=new Thickness(0,0,0,16)};
+    static StackPanel SectionTitle(string title,string subtitle){var panel=new StackPanel();panel.Children.Add(new TextBlock{Text=title,FontSize=17,FontWeight=FontWeights.SemiBold});panel.Children.Add(new TextBlock{Text=subtitle,FontSize=12,Foreground=Brush("#7A8B99"),Margin=new Thickness(0,4,0,0)});return panel;}
+    static void AddSetting(StackPanel parent,CheckBox setting,string title,string description){setting.Content=SectionTitle(title,description);setting.Margin=new Thickness(0,9,0,0);System.Windows.Automation.AutomationProperties.SetName(setting,title);parent.Children.Add(new Border{Child=setting,BorderBrush=Brush("#EDF2F6"),BorderThickness=new Thickness(0,1,0,0),Padding=new Thickness(0,4,0,4)});}
     void InitializedWindow(object? sender,EventArgs e) {
         source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(Hook);hotkey=new(source.Handle);
         try{hotkey.Set(settings.Modifiers,settings.VirtualKey);}catch(Exception error){diagnostic.Text=error.Message;}
@@ -104,7 +127,7 @@ internal sealed class MainWindow:Window {
     async Task Execute(Func<Task> action){try{await action();}catch(Exception e){Storage.Log("操作失败",e.ToString());status.Text=e.Message;}}
     void Run(Action action){try{action();}catch(Exception e){Storage.Log("设置失败",e.ToString());MessageBox.Show(this,e.Message,"设置未保存");startup.IsChecked=settings.StartWithWindows;}}
     void Save()=>Storage.Save(Storage.SettingsPath,settings);
-    void Update(){state.Text="内屏"+controller.State;status.Text=controller.Message;toggle.IsEnabled=!controller.IsBusy;tray.Text="内屏开关 · "+controller.State;}
+    void Update(){state.Text="内屏"+controller.State;status.Text=controller.Message;toggle.IsEnabled=!controller.IsBusy;toggle.Content=controller.HasRecovery?"开启内屏":"关闭内屏";stateBadge.Text=controller.State==PanelState.开启?"●  已开启":controller.State==PanelState.关闭?"●  已关闭":"●  "+controller.State;hero.Background=Brush(controller.State==PanelState.关闭?"#E8EEF5":controller.State==PanelState.故障?"#FFF0E8":"#E6F4EF");tray.Text="内屏开关 · "+controller.State;}
     void ShowSettings(){Show();WindowState=WindowState.Normal;Activate();}
     async Task RefreshDiagnostic(){diagnostic.Text="正在读取本机显示能力…";try{controller.Refresh();var result=await Task.Run(()=>Diagnostics.Collect());var displays=DisplayNative.Query().Paths.Select(DisplayNative.Describe).ToArray();diagnostic.Text="内置屏幕："+string.Join("、",displays.Where(x=>x.Internal).Select(x=>x.Name))+Environment.NewLine+"物理外接屏："+displays.Count(x=>!x.Internal&&!Controller.IsVirtual(x))+" 台"+Environment.NewLine+"虚拟显示器："+(displays.Any(Controller.IsVirtual)?"已就绪":"未检测到")+Environment.NewLine+"完整设备信息和运行记录可通过“导出诊断”保存。";Storage.Save(Path.Combine(Storage.Root,"最新诊断.json"),result);}catch(Exception e){diagnostic.Text="检测未完成："+e.Message;}}
     async Task ExportDiagnostic(){var dialog=new SaveFileDialog{FileName="内屏开关诊断.json",Filter="诊断文件|*.json"};if(dialog.ShowDialog(this)==true){var result=await Task.Run(()=>Diagnostics.Collect());Storage.Save(dialog.FileName,result);}}

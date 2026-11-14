@@ -21,7 +21,7 @@ internal static class Install {
             string destination=Path.Combine(Target,Path.GetRelativePath(source,file));Directory.CreateDirectory(Path.GetDirectoryName(destination)!);File.Copy(file,destination,true);
         }
         string exe=Path.Combine(Target,"PanelSwitch.exe");Type type=Type.GetTypeFromProgID("WScript.Shell")!;dynamic shell=Activator.CreateInstance(type)!;
-        dynamic link=shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),"Programs","内屏开关.lnk"));link.TargetPath=exe;link.WorkingDirectory=Target;link.Save();
+        dynamic link=shell.CreateShortcut(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),"Programs","内屏开关.lnk"));link.TargetPath=exe;link.IconLocation=exe+",0";link.WorkingDirectory=Target;link.Save();
         System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
         Process.Start(new ProcessStartInfo(exe){UseShellExecute=true});return 0;
     }
