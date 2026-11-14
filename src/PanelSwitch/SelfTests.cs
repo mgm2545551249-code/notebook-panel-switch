@@ -28,6 +28,8 @@ internal static class SelfTests {
         Test("内屏具有稳定设备标识",()=>Assert(snapshot.Paths.Select(DisplayNative.Describe).Any(x=>x.Internal&&!string.IsNullOrEmpty(x.DevicePath)),"无内屏标识"));
         Test("桌面和任务栏不参与普通窗口位置恢复",()=>{foreach(string cls in new[]{"Progman","WorkerW","Shell_TrayWnd","Shell_SecondaryTrayWnd"})Assert(WindowPlacement.IsShellSurface(cls),"遗漏系统窗口："+cls);Assert(!WindowPlacement.IsShellSurface("CabinetWClass"),"文件管理窗口被错误排除");Assert(!WindowPlacement.IsShellSurface("普通应用窗口"),"普通窗口被错误排除");Assert(WindowPlacement.Capture().All(w=>!WindowPlacement.IsShellSurface(new IntPtr(w.Handle))),"快照仍包含桌面或任务栏");});
         Test("桌面图标视图定位和重绘请求",()=>{Assert(DesktopRefresh.IconViews().Length>0,"当前会话未找到桌面图标视图");Assert(DesktopRefresh.RepaintOnce()>0,"桌面重绘请求未成功");});
+        Test("登录启动命令正确引用带空格的路径",()=>Assert(Install.StartupCommand(@"C:\程序目录\测试 软件\PanelSwitch.exe")=="\"C:\\程序目录\\测试 软件\\PanelSwitch.exe\" --background","启动命令引用错误"));
+        Test("拒绝无效登录启动路径",()=>{foreach(string path in new[]{"PanelSwitch.exe","C:\\程序\"目录\\PanelSwitch.exe","C:\\程序\\脚本.cmd"}){try{Install.StartupCommand(path);}catch(ArgumentException){continue;}throw new Exception("接受了无效启动路径");}});
         Storage.Save(output,new{时间=DateTimeOffset.Now,通过=tests.Count-failures,失败=failures,测试=tests,说明="五十次测试为布局数据往返，不是实机开关五十次。"});return failures==0?0:1;
     }
     static byte[] Bytes<T>(T[] values) where T:struct {int size=Marshal.SizeOf<T>();var bytes=new byte[size*values.Length];IntPtr p=Marshal.AllocHGlobal(size);try{for(int i=0;i<values.Length;i++){Marshal.StructureToPtr(values[i],p,false);Marshal.Copy(p,bytes,i*size,size);}}finally{Marshal.FreeHGlobal(p);}return bytes;}

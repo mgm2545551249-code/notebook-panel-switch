@@ -59,7 +59,7 @@ internal sealed class MainWindow:Window {
         nextModifiers=settings.Modifiers;nextKey=settings.VirtualKey;shortcut.Text=DescribeKey(nextModifiers,nextKey);shortcut.Margin=new Thickness(0,0,12,0);shortcut.FontSize=15;
         shortcut.ToolTip="点击后按下新的组合键，再保存";shortcut.PreviewKeyDown+=CaptureShortcut;Grid.SetColumn(shortcut,1);keys.Children.Add(shortcut);
         var save=Button("保存快捷键",()=>{hotkey!.Set(nextModifiers,nextKey);settings.Modifiers=nextModifiers;settings.VirtualKey=nextKey;Save();return Task.CompletedTask;});save.Margin=new Thickness(0);Grid.SetColumn(save,2);keys.Children.Add(save);settingsPanel.Children.Add(keys);
-        startup.IsChecked=settings.StartWithWindows;awake.IsChecked=settings.KeepAwake;virtualDisplay.IsChecked=settings.AllowVirtualDisplay;
+        startup.IsChecked=Install.StartupEnabled();settings.StartWithWindows=startup.IsChecked==true;awake.IsChecked=settings.KeepAwake;virtualDisplay.IsChecked=settings.AllowVirtualDisplay;
         startup.Click+=(_,_)=>Run(()=>{Install.SetStartup(startup.IsChecked==true);settings.StartWithWindows=startup.IsChecked==true;Save();});
         awake.Click+=(_,_)=>Run(()=>{settings.KeepAwake=awake.IsChecked==true;Save();if(controller.HasRecovery)Native.Awake(settings.KeepAwake);});
         virtualDisplay.Click+=(_,_)=>Run(()=>{settings.AllowVirtualDisplay=virtualDisplay.IsChecked==true;Save();controller.Refresh();});

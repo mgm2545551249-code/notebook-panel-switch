@@ -8,6 +8,7 @@ static class Program {
     [STAThread] static int Main(string[] args) {
         try {
             Directory.CreateDirectory(Storage.Root);
+            if(args.Contains("--enable-startup")){Install.SetStartup(true);var settings=Settings.Read();settings.StartWithWindows=true;Storage.Save(Storage.SettingsPath,settings);return 0;}
             if(args.Contains("--stop")){Install.StopRunning();return 0;}
             if(args.Contains("--desktop-refresh")){DesktopRefresh.AfterLayoutRestored();return 0;}
             if(args.Contains("--power-agent"))return PowerAgent.Run(args[1],int.Parse(args[2]),long.Parse(args[3]));
@@ -27,6 +28,8 @@ static class Program {
             if(args.Contains("--recover")){Recovery.RestorePending(true);PowerAgent.RestoreStale();Native.MonitorPower(-1);return 0;}
             using var mutex=new Mutex(true,"Local\\PanelSwitch.Main",out bool first);if(!first){if(!args.Contains("--background"))MessageBox.Show("内屏开关已在托盘运行。","内屏开关");return 0;}
             Recovery.RestorePending();PowerAgent.RestoreStale();
+            try{Install.SynchronizeStartup();}catch(Exception e){Storage.Log("登录启动状态核对失败",e.ToString());}
+            Storage.Log("主程序启动",new{后台模式=args.Contains("--background"),路径=Environment.ProcessPath,登录启动=Install.StartupEnabled()});
             var app=new System.Windows.Application();
             app.DispatcherUnhandledException+=(_,e)=>{Storage.Log("界面异常",e.Exception.ToString());try{Recovery.RestorePending(true);}catch{}e.Handled=true;MessageBox.Show(e.Exception.Message,"内屏开关");};
             AppDomain.CurrentDomain.UnhandledException+=(_,e)=>Storage.Log("进程异常",e.ExceptionObject.ToString());
