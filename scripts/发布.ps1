@@ -18,5 +18,7 @@ if($IncludeVirtualDriver){
     $expected=@{'mttvdd.cat'='08A0093FC9B2E32B287A6F8A77CA4DE0A31830D29FC33D2B13A918DC859468F6';'MttVDD.dll'='C9CA837F57A98FBD43BC416A7F535A95843626E7759EAF85CF0CD7CE334DBB05';'MttVDD.inf'='550D211FE481E74DFE3F9D724ED78BE48B3A9113405965D683D9373E8D672F5D'}
     foreach($name in $expected.Keys){if((Get-FileHash -LiteralPath (Join-Path $driverRoot "VirtualDisplayDriver/$name")).Hash -ne $expected[$name]){throw "驱动文件哈希不一致：$name"}}
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot '安装虚拟显示.ps1') -Destination (Join-Path $driverRoot '安装虚拟显示.ps1') -Force
+    $remove='@echo off'+"`r`n"+'powershell.exe -NoProfile -Command "Start-Process -FilePath ''%~dp0PanelSwitch.exe'' -ArgumentList ''--remove-vdd'' -Verb RunAs -WindowStyle Hidden -Wait"'+"`r`n"+'exit /b %errorlevel%'+"`r`n"
+    [IO.File]::WriteAllText((Join-Path $target '卸载虚拟显示驱动.cmd'),$remove,[Text.Encoding]::ASCII)
 }
 Write-Output "发布完成：$target"
