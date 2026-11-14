@@ -8,6 +8,8 @@ static class Program {
     [STAThread] static int Main(string[] args) {
         try {
             Directory.CreateDirectory(Storage.Root);
+            if(args.Contains("--stop")){Install.StopRunning();return 0;}
+            if(args.Contains("--desktop-refresh")){DesktopRefresh.AfterLayoutRestored();return 0;}
             if(args.Contains("--power-agent"))return PowerAgent.Run(args[1],int.Parse(args[2]),long.Parse(args[3]));
             if(args.Contains("--power-agent-test"))return IntegrationTests.TestPowerAgent(args[1]).GetAwaiter().GetResult();
             if(args.Contains("--watchdog"))return Recovery.Watch(args[1],args[2]);

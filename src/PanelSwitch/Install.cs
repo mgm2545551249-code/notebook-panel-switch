@@ -25,5 +25,5 @@ internal static class Install {
         System.Runtime.InteropServices.Marshal.FinalReleaseComObject(link);System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shell);
         Process.Start(new ProcessStartInfo(exe){UseShellExecute=true});return 0;
     }
-    static void StopRunning(){var window=Native.FindWindow(null,"内屏开关");if(window==IntPtr.Zero)return;Native.GetWindowThreadProcessId(window,out uint pid);using var process=Process.GetProcessById((int)pid);Native.PostMessage(window,Native.ExitMessage,IntPtr.Zero,IntPtr.Zero);if(!process.WaitForExit(15000))throw new Exception("常驻程序尚未退出，请先从托盘退出再安装或卸载。");}
+    internal static void StopRunning(){var window=Native.FindWindow(null,"内屏开关");if(window==IntPtr.Zero)return;Native.GetWindowThreadProcessId(window,out uint pid);using var process=Process.GetProcessById((int)pid);Native.PostMessage(window,Native.ExitMessage,IntPtr.Zero,IntPtr.Zero);if(!process.WaitForExit(15000))throw new Exception("常驻程序尚未退出，请先从托盘退出再安装或卸载。");}
 }

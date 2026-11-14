@@ -66,6 +66,7 @@ internal static class Recovery {
         if(lease.Method=="布局") {
             try{DisplayNative.Apply(lease.Original);}catch{DisplayNative.EmergencyInternal();}
             WindowPlacement.RestoreAll(lease.Windows);
+            DesktopRefresh.AfterLayoutRestored();
         } else if(lease.Method=="内屏电源") {
             var target=System.Linq.Enumerable.FirstOrDefault(System.Linq.Enumerable.Select(DisplayNative.Query().Paths,DisplayNative.Describe),p=>string.Equals(p.DevicePath,lease.DevicePath,StringComparison.OrdinalIgnoreCase));
             if(target!=null)DisplayNative.DdcPower(target.GdiName,1);else DisplayNative.EmergencyInternal();

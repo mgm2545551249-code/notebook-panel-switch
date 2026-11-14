@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Interop;
 
 namespace PanelSwitch;
@@ -42,10 +43,13 @@ public sealed class WindowPlacement {
     [DllImport("user32.dll")] static extern bool GetWindowPlacement(IntPtr hwnd,ref Placement placement);
     [DllImport("user32.dll")] static extern bool SetWindowPlacement(IntPtr hwnd,ref Placement placement);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder text,int max);
+    internal static bool IsShellSurface(string name)=>name=="Progman"||name=="WorkerW"||name=="Shell_TrayWnd"||name=="Shell_SecondaryTrayWnd";
+    internal static bool IsShellSurface(IntPtr hwnd){var name=new StringBuilder(256);GetClassName(hwnd,name,name.Capacity);return IsShellSurface(name.ToString());}
     public static WindowPlacement[] Capture() {
         var result=new List<WindowPlacement>();
         EnumWindows((h,_)=>{try{
-            if(!IsWindowVisible(h))return true;
+            if(!IsWindowVisible(h)||IsShellSurface(h))return true;
             var p=new Placement{Length=(uint)Marshal.SizeOf<Placement>()};
             GetWindowThreadProcessId(h,out uint pid);using var process=Process.GetProcessById((int)pid);
             if(GetWindowPlacement(h,ref p))result.Add(new(){Handle=h.ToInt64(),ProcessId=(int)pid,ProcessStarted=process.StartTime.ToUniversalTime().Ticks,Position=p});
@@ -53,7 +57,7 @@ public sealed class WindowPlacement {
     }
     public static void RestoreAll(WindowPlacement[] windows) {
         foreach(var w in windows)try{
-            var h=new IntPtr(w.Handle);GetWindowThreadProcessId(h,out uint pid);if(pid!=w.ProcessId)continue;
+            var h=new IntPtr(w.Handle);if(IsShellSurface(h))continue;GetWindowThreadProcessId(h,out uint pid);if(pid!=w.ProcessId)continue;
             using var process=Process.GetProcessById((int)pid);if(process.StartTime.ToUniversalTime().Ticks!=w.ProcessStarted)continue;
             var p=w.Position;p.Length=(uint)Marshal.SizeOf<Placement>();SetWindowPlacement(h,ref p);
         }catch{}

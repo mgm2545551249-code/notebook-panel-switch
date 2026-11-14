@@ -26,6 +26,8 @@ internal static class SelfTests {
         Test("ACPI事件解析拒绝截断数据",()=>{try{PowerAgent.DecodeButton(25,new byte[]{128,0,0,0});}catch(FormatException){return;}throw new Exception("未拒绝截断事件");});
         Test("本机真实固件按钮路径回归",()=>{Assert(PowerAgent.IsPowerEvent(24,0,@"\_SB.PWRB",1),"本机固件按钮被过滤");Assert(PowerAgent.IsPowerEvent(25,0,@"\_SB.PWRB",1),"本机完成事件被过滤");Assert(!PowerAgent.IsPowerEvent(24,0,@"\_SB.LID_",4),"盖子事件错误触发");});
         Test("内屏具有稳定设备标识",()=>Assert(snapshot.Paths.Select(DisplayNative.Describe).Any(x=>x.Internal&&!string.IsNullOrEmpty(x.DevicePath)),"无内屏标识"));
+        Test("桌面和任务栏不参与普通窗口位置恢复",()=>{foreach(string cls in new[]{"Progman","WorkerW","Shell_TrayWnd","Shell_SecondaryTrayWnd"})Assert(WindowPlacement.IsShellSurface(cls),"遗漏系统窗口："+cls);Assert(!WindowPlacement.IsShellSurface("CabinetWClass"),"文件管理窗口被错误排除");Assert(!WindowPlacement.IsShellSurface("普通应用窗口"),"普通窗口被错误排除");Assert(WindowPlacement.Capture().All(w=>!WindowPlacement.IsShellSurface(new IntPtr(w.Handle))),"快照仍包含桌面或任务栏");});
+        Test("桌面图标视图定位和重绘请求",()=>{Assert(DesktopRefresh.IconViews().Length>0,"当前会话未找到桌面图标视图");Assert(DesktopRefresh.RepaintOnce()>0,"桌面重绘请求未成功");});
         Storage.Save(output,new{时间=DateTimeOffset.Now,通过=tests.Count-failures,失败=failures,测试=tests,说明="五十次测试为布局数据往返，不是实机开关五十次。"});return failures==0?0:1;
     }
     static byte[] Bytes<T>(T[] values) where T:struct {int size=Marshal.SizeOf<T>();var bytes=new byte[size*values.Length];IntPtr p=Marshal.AllocHGlobal(size);try{for(int i=0;i<values.Length;i++){Marshal.StructureToPtr(values[i],p,false);Marshal.Copy(p,bytes,i*size,size);}}finally{Marshal.FreeHGlobal(p);}return bytes;}
