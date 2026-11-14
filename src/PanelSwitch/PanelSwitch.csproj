@@ -8,7 +8,7 @@
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>PanelSwitch</AssemblyName>
-    <Version>1.1.2</Version>
+    <Version>1.1.3-local</Version>
     <ApplicationIcon>Assets/app.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
