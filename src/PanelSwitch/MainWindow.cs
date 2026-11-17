@@ -22,6 +22,7 @@ internal sealed class MainWindow:Window {
     readonly TextBlock status=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,12),Foreground=Brushes.DimGray};
     readonly TextBox diagnostic=new(){IsReadOnly=true,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,MinHeight=130};
     readonly TextBox shortcut=new(){IsReadOnly=true,MinWidth=200};
+    readonly TextBox environment=new(){IsReadOnly=true,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,Height=190,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
     readonly CheckBox startup=new(){Content="登录后自动运行",Margin=new Thickness(0,8,0,0)};
     readonly CheckBox awake=new(){Content="关屏期间保持后台运行",Margin=new Thickness(0,8,0,0)};
     readonly CheckBox virtualDisplay=new(){Content="允许使用已安装的虚拟显示器维持单内屏关屏",Margin=new Thickness(0,8,0,0)};
@@ -75,6 +76,10 @@ internal sealed class MainWindow:Window {
         deviceTitle.Children.Add(SectionTitle("设备状态","显示连接与控制能力"));var refresh=Button("重新检测",RefreshDiagnostic);refresh.Margin=new Thickness(0);Grid.SetColumn(refresh,1);deviceTitle.Children.Add(refresh);devicePanel.Children.Add(deviceTitle);
         diagnostic.MinHeight=0;diagnostic.Height=94;diagnostic.BorderThickness=new Thickness(0);diagnostic.Background=Brushes.Transparent;diagnostic.Padding=new Thickness(0);diagnostic.Margin=new Thickness(0,14,0,0);diagnostic.FontSize=13;devicePanel.Children.Add(diagnostic);
         root.Children.Add(Card(devicePanel));
+        var environmentPanel=new StackPanel();
+        environmentPanel.Children.Add(SectionTitle("显示环境检测","自动读取参数；不会关屏或修改系统配置"));
+        environmentPanel.Children.Add(Button("检测显示环境",RefreshEnvironment));
+        environmentPanel.Children.Add(environment);root.Children.Add(Card(environmentPanel));
         var advanced=new StackPanel();var tools=new WrapPanel{Margin=new Thickness(0,14,0,0)};advanced.Children.Add(tools);
         tools.Children.Add(Button("导出诊断",ExportDiagnostic));
         tools.Children.Add(Button("常规接口对照测试",async()=>{if(MessageBox.Show(this,"该对照测试会关闭所有屏幕，普通键鼠可能唤醒。十五秒后自动恢复。继续测试？","对照测试",MessageBoxButton.YesNo)==MessageBoxResult.Yes)await controller.Toggle(15,new BaselineBackend());}));
@@ -87,7 +92,7 @@ internal sealed class MainWindow:Window {
         using(var iconStream=typeof(MainWindow).Assembly.GetManifestResourceStream("PanelSwitch.Assets.app.ico")){tray.Icon=iconStream!=null?new System.Drawing.Icon(iconStream):System.Drawing.SystemIcons.Application;}tray.Text="内屏开关";
         var menu=new Forms.ContextMenuStrip();menu.Items.Add("切换内屏",null,async(_,_)=>await Execute(()=>controller.Toggle()));menu.Items.Add("显示设置",null,(_,_)=>ShowSettings());menu.Items.Add("恢复内屏",null,async(_,_)=>await Execute(controller.Restore));menu.Items.Add("退出并恢复",null,async(_,_)=>await Exit());
         tray.ContextMenuStrip=menu;tray.DoubleClick+=(_,_)=>ShowSettings();tray.Visible=true;
-        SourceInitialized+=InitializedWindow;Loaded+=async(_,_)=>{if(background)Hide();await RefreshDiagnostic();scroll.ScrollToTop();if(!smoke&&settings.EnablePowerButton)await Execute(StartPowerAgent);if(smoke){Storage.Save(Path.Combine(Storage.Root,"界面冒烟测试.json"),new{结果="通过",标题=Title,快捷键=shortcut.Text,状态=controller.State.ToString(),时间=DateTimeOffset.Now});await Exit();}};
+        SourceInitialized+=InitializedWindow;Loaded+=async(_,_)=>{if(background)Hide();await RefreshEnvironment();await RefreshDiagnostic();scroll.ScrollToTop();if(!smoke&&settings.EnablePowerButton)await Execute(StartPowerAgent);if(smoke){Storage.Save(Path.Combine(Storage.Root,"界面冒烟测试.json"),new{结果="通过",标题=Title,快捷键=shortcut.Text,状态=controller.State.ToString(),时间=DateTimeOffset.Now});await Exit();}};
         timer.Tick+=async(_,_)=>{if(ticking)return;ticking=true;try{if(powerAgent!=null)await powerAgent.Pulse();await controller.Tick();}catch(Exception e){Storage.Log("恢复监视异常",e.ToString());}finally{ticking=false;}};timer.Start();
         Closing+=(_,e)=>{if(!exiting){e.Cancel=true;Hide();}};
         Closed+=(_,_)=>{timer.Stop();hotkey?.Dispose();buttonInput?.Dispose();if(powerNotification!=IntPtr.Zero)Native.UnregisterPowerSettingNotification(powerNotification);source?.RemoveHook(Hook);tray.Icon?.Dispose();tray.Dispose();};
@@ -129,6 +134,11 @@ internal sealed class MainWindow:Window {
     void Save()=>Storage.Save(Storage.SettingsPath,settings);
     void Update(){state.Text="内屏"+controller.State;status.Text=controller.Message;toggle.IsEnabled=!controller.IsBusy;toggle.Content=controller.HasRecovery?"开启内屏":"关闭内屏";stateBadge.Text=controller.State==PanelState.开启?"●  已开启":controller.State==PanelState.关闭?"●  已关闭":"●  "+controller.State;hero.Background=Brush(controller.State==PanelState.关闭?"#E8EEF5":controller.State==PanelState.故障?"#FFF0E8":"#E6F4EF");tray.Text="内屏开关 · "+controller.State;}
     void ShowSettings(){Show();WindowState=WindowState.Normal;Activate();}
+    async Task RefreshEnvironment(){
+        environment.Text="正在检测显示环境…";
+        try{var report=await Task.Run(EnvironmentCheck.Collect);environment.Text=EnvironmentCheck.Text(report);Storage.Save(Path.Combine(Storage.Root,"显示环境检测.json"),report);}
+        catch(Exception e){environment.Text="检测未完成："+e.Message;}
+    }
     async Task RefreshDiagnostic(){diagnostic.Text="正在读取本机显示能力…";try{controller.Refresh();var result=await Task.Run(()=>Diagnostics.Collect());var displays=DisplayNative.Query().Paths.Select(DisplayNative.Describe).ToArray();diagnostic.Text="内置屏幕："+string.Join("、",displays.Where(x=>x.Internal).Select(x=>x.Name))+Environment.NewLine+"物理外接屏："+displays.Count(x=>!x.Internal&&!Controller.IsVirtual(x))+" 台"+Environment.NewLine+"虚拟显示器："+(displays.Any(Controller.IsVirtual)?"已就绪":"未检测到")+Environment.NewLine+"完整设备信息和运行记录可通过“导出诊断”保存。";Storage.Save(Path.Combine(Storage.Root,"最新诊断.json"),result);}catch(Exception e){diagnostic.Text="检测未完成："+e.Message;}}
     async Task ExportDiagnostic(){var dialog=new SaveFileDialog{FileName="内屏开关诊断.json",Filter="诊断文件|*.json"};if(dialog.ShowDialog(this)==true){var result=await Task.Run(()=>Diagnostics.Collect());Storage.Save(dialog.FileName,result);}}
     async Task InstallVirtual(){await VddInstaller.LaunchInstall();await RefreshDiagnostic();}

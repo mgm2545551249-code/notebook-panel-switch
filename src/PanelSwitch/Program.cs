@@ -8,6 +8,7 @@ static class Program {
     [STAThread] static int Main(string[] args) {
         try {
             Directory.CreateDirectory(Storage.Root);
+            if(args.Contains("--environment-check")){Storage.Save(args[1],EnvironmentCheck.Collect());return 0;}
             if(args.Contains("--calibrate-virtual-dpi"))return IntegrationTests.Run(args[1],2,false,true);
             if(args.Contains("--display-parameters")){Storage.Save(args[1],DisplayNative.Parameters());return 0;}
             if(args.Contains("--desktop-status")){Storage.Save(args[1],DesktopRefresh.Describe());return 0;}

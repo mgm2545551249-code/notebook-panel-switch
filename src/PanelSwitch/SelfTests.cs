@@ -30,6 +30,7 @@ internal static class SelfTests {
         Test("桌面图标视图定位和重绘请求",()=>{Assert(DesktopRefresh.IconViews().Length>0,"当前会话未找到桌面图标视图");Assert(DesktopRefresh.RepaintOnce()>0,"桌面重绘请求未成功");});
         Test("登录启动命令正确引用带空格的路径",()=>Assert(Install.StartupCommand(@"C:\程序目录\测试 软件\PanelSwitch.exe")=="\"C:\\程序目录\\测试 软件\\PanelSwitch.exe\" --background","启动命令引用错误"));
         Test("拒绝无效登录启动路径",()=>{foreach(string path in new[]{"PanelSwitch.exe","C:\\程序\"目录\\PanelSwitch.exe","C:\\程序\\脚本.cmd"}){try{Install.StartupCommand(path);}catch(ArgumentException){continue;}throw new Exception("接受了无效启动路径");}});
+        Test("显示环境检测包含参数与未验证提示",()=>{var text=EnvironmentCheck.Summary(DisplayNative.Parameters());Assert(text.Contains("逻辑桌面"),"没有逻辑桌面参数");Assert(text.Contains("不代表独立虚拟屏参数一致"),"缺少独立状态提示");});
         Storage.Save(output,new{时间=DateTimeOffset.Now,通过=tests.Count-failures,失败=failures,测试=tests,说明="五十次测试为布局数据往返，不是实机开关五十次。"});return failures==0?0:1;
     }
     static byte[] Bytes<T>(T[] values) where T:struct {int size=Marshal.SizeOf<T>();var bytes=new byte[size*values.Length];IntPtr p=Marshal.AllocHGlobal(size);try{for(int i=0;i<values.Length;i++){Marshal.StructureToPtr(values[i],p,false);Marshal.Copy(p,bytes,i*size,size);}}finally{Marshal.FreeHGlobal(p);}return bytes;}
