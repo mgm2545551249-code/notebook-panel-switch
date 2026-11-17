@@ -16,27 +16,38 @@ internal static class IntegrationTests {
     }
     [DllImport("user32.dll")] static extern void mouse_event(uint flags,int dx,int dy,uint data,UIntPtr extra);
     static bool Same(DisplaySnapshot a,DisplaySnapshot b)=>a.Paths.Select(DisplayNative.Key).OrderBy(x=>x).SequenceEqual(b.Paths.Select(DisplayNative.Key).OrderBy(x=>x));
-    public static int Run(string output,int cycles,bool baseline=false) {
-        int result=1;var app=new System.Windows.Application{ShutdownMode=System.Windows.ShutdownMode.OnExplicitShutdown};
+    public static int Run(string output,int cycles,bool baseline=false,bool calibrate=false) {
+        int completed=0;int result=1;var app=new System.Windows.Application{ShutdownMode=System.Windows.ShutdownMode.OnExplicitShutdown};
         app.Startup+=async(_,_)=>{
             var initial=DisplayNative.Query();var logs=new List<object>();var settings=new Settings{AllowVirtualDisplay=true};var controller=new Controller(settings);
+            int desired=calibrate?DisplayDpi.Percent(initial.Paths.First(p=>DisplayNative.IsInternal(p.Target.Technology))):0;
             try{
                 for(int i=0;i<cycles;i++){
                     var watch=Stopwatch.StartNew();controller.Refresh();await controller.Toggle(15,baseline?new BaselineBackend():null);
                     if(controller.State!=PanelState.关闭)throw new Exception("关屏失败："+controller.Message);
                     var off=DisplayNative.Query();
+                    if(calibrate){
+                        var virtuals=off.Paths.Where(p=>Controller.IsVirtual(DisplayNative.Describe(p))).ToArray();
+                        if(off.Paths.Length!=1||virtuals.Length!=1)throw new Exception("校准要求仅有一个独立虚拟屏。");
+                        int previous=DisplayDpi.Percent(virtuals[0]);
+                        string backup=System.IO.Path.Combine(Storage.Root,"虚拟屏缩放校准备份.json");
+                        if(!System.IO.File.Exists(backup))Storage.Save(backup,new{设备=DisplayNative.Describe(virtuals[0]).DevicePath,原缩放=previous,目标缩放=desired});
+                        DisplayDpi.ApplyVirtual(virtuals[0],desired);
+                        logs.Add(new{校准轮次=i+1,原缩放=previous,目标缩放=desired,回读缩放=DisplayDpi.Percent(virtuals[0])});
+                        Storage.Save(output+".关屏参数.json",DisplayNative.Parameters());
+                    }
                     if(!baseline&&off.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology)))throw new Exception("内屏路径仍然启用");
                     // 仅发送相对鼠标移动，不输入字符、不点击任何控件。
-                    mouse_event(1,2,0,0,UIntPtr.Zero);await Task.Delay(i==0?4000:100);mouse_event(1,-2,0,0,UIntPtr.Zero);
+                    mouse_event(1,2,0,0,UIntPtr.Zero);for(int t=0;t<(i==0?20:1);t++){await Task.Delay(200);await controller.Tick();}mouse_event(1,-2,0,0,UIntPtr.Zero);
                     var afterInput=DisplayNative.Query();bool remained=baseline?true:!afterInput.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology));
                     if(!remained)throw new Exception("普通鼠标输入后内屏重新启用");
                     await controller.Restore();var restored=DisplayNative.Query();if(!Same(initial,restored))throw new Exception("原始显示路径未恢复");
                     logs.Add(new{轮次=i+1,关闭后路径=off.Paths.Select(DisplayNative.Describe).ToArray(),鼠标输入后内屏路径仍停用=!afterInput.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology)),恢复后路径一致=true,耗时毫秒=watch.ElapsedMilliseconds});
-                    await Task.Delay(120);
+                    completed++;await Task.Delay(120);
                 }
                 result=0;
             }catch(Exception e){logs.Add(new{错误=e.ToString()});try{await controller.Restore();}catch{} }
-            finally{Storage.Save(output,new{时间=DateTimeOffset.Now,类型=baseline?"常规关屏对照":"真实显示布局开关",请求轮次=cycles,完成轮次=logs.Count(x=>!x.ToString()!.Contains("错误")),退出码=result,日志=logs,最终路径=DisplayNative.Query().Paths.Select(DisplayNative.Describe),说明="路径停用与鼠标输入状态已由软件检查；面板是否停止发光仍需现场观察确认。"});app.Shutdown(result);}
+            finally{Storage.Save(output,new{时间=DateTimeOffset.Now,类型=baseline?"常规关屏对照":"真实显示布局开关",请求轮次=cycles,完成轮次=completed,退出码=result,日志=logs,最终路径=DisplayNative.Query().Paths.Select(DisplayNative.Describe),说明="路径停用与鼠标输入状态已由软件检查；面板是否停止发光仍需现场观察确认。"});app.Shutdown(result);}
         };app.Run();return result;
     }
     public static int Crash(string marker) {

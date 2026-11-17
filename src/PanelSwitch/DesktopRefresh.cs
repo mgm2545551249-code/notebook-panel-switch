@@ -99,7 +99,10 @@ internal static class DesktopRefresh {
             Thread.Sleep(delay);
             if(!File.Exists(Path.Combine(Storage.Root,"桌面刷新批次.txt"))||File.ReadAllText(Path.Combine(Storage.Root,"桌面刷新批次.txt"))!=id)return 0;
             if(!DisplayNative.Query().Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology)))return 0;
-            if(File.Exists(Storage.LeasePath))return 0;
+            if(File.Exists(Storage.LeasePath)){
+                // 内屏已启用时可能仍在恢复同一租约；跳过本轮而非丢弃整批补救。
+                continue;
+            }
             int count=RepaintOnce();
             Storage.Log("桌面子树同步重绘",new{批次=id,图标视图数=count,调度后毫秒=elapsed.ElapsedMilliseconds});
         }return 0;

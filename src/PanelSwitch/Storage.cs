@@ -23,7 +23,7 @@ internal static class Storage {
     public static T? Load<T>(string path){try{return JsonSerializer.Deserialize<T>(File.ReadAllText(path),Json);}catch(FileNotFoundException){return default;}catch(DirectoryNotFoundException){return default;}}
     public static void Log(string action,object? details=null) {
         lock(LogLock){try{Directory.CreateDirectory(Root);if(File.Exists(LogPath)&&new FileInfo(LogPath).Length>4*1024*1024)File.Move(LogPath,LogPath+".previous",true);
-        File.AppendAllText(LogPath,JsonSerializer.Serialize(new{时间=DateTimeOffset.Now,进程=Environment.ProcessId,事件=action,数据=details},new JsonSerializerOptions{Encoder=Json.Encoder})+Environment.NewLine);}catch{}}
+        File.AppendAllText(LogPath,JsonSerializer.Serialize(new{时间=DateTimeOffset.Now,进程=Environment.ProcessId,事件=action,数据=details},new JsonSerializerOptions{Encoder=Json.Encoder,IncludeFields=true})+Environment.NewLine);}catch{}}
     }
     public static Process Launch(params string[] args) {
         var start=new ProcessStartInfo(Environment.ProcessPath!){UseShellExecute=false,CreateNoWindow=true};
@@ -65,6 +65,9 @@ internal static class Recovery {
         // 显示器热插拔或重启后，旧适配器标识可能失效，改用当前内屏布局恢复。
         if(lease.Method=="布局") {
             try{DisplayNative.Apply(lease.Original);}catch{DisplayNative.EmergencyInternal();}
+            // 图标先补绘，不被等待显示稳定和逐个应用恢复阻塞。
+            DesktopRefresh.AfterLayoutRestored();
+            WaitForDisplaySettlement();
             WindowPlacement.RestoreAll(lease.Windows);
             DesktopRefresh.AfterLayoutRestored();
         } else if(lease.Method=="内屏电源") {
@@ -73,6 +76,17 @@ internal static class Recovery {
         } else if(lease.Method=="常规诊断") Native.MonitorPower(-1);
         if(lease.PowerPolicy!=null)PowerPolicy.Restore(lease.PowerPolicy);
         Storage.Log("恢复成功",new{lease.Id,lease.Method});
+    }
+    // 有界等待，不在用户恢复操作后反复强制改动窗口。
+    internal static void WaitForDisplaySettlement() {
+        var timer=Stopwatch.StartNew();string? last=null;int stable=0;
+        while(timer.ElapsedMilliseconds<2400){
+            Thread.Sleep(150);
+            var current=System.Text.Json.JsonSerializer.Serialize(DisplayNative.Query(),Storage.Json);
+            stable=current==last?stable+1:0;last=current;
+            if(timer.ElapsedMilliseconds>=900&&stable>=3)break;
+        }
+        Storage.Log("显示布局稳定等待完成",new{耗时毫秒=timer.ElapsedMilliseconds,连续稳定次数=stable});
     }
     public static bool RestorePending(bool force=false) {
         var lease=Storage.Load<RecoveryLease>(Storage.LeasePath);if(lease==null)return true;

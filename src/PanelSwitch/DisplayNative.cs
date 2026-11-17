@@ -64,6 +64,15 @@ internal static class DisplayNative {
     [DllImport("user32.dll",EntryPoint="DisplayConfigGetDeviceInfo")] static extern int GetSourceName(ref SourceName name);
     [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc,IntPtr clip,MonitorCallback callback,IntPtr data);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor,ref MonitorInfo info);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor,int type,out uint x,out uint y);
+    internal static object Parameters() {
+        var snapshot=Query();var monitors=new List<object>();
+        EnumDisplayMonitors(IntPtr.Zero,IntPtr.Zero,(IntPtr h,IntPtr dc,ref Rect r,IntPtr data)=>{
+            var info=new MonitorInfo{Size=(uint)Marshal.SizeOf<MonitorInfo>()};
+            if(GetMonitorInfo(h,ref info)){int rc=GetDpiForMonitor(h,0,out uint x,out uint y);monitors.Add(new{设备=info.Device,区域=info.Monitor,工作区=info.Work,主屏=(info.Flags&1)!=0,Dpi结果=rc,DpiX=x,DpiY=y});}return true;
+        },IntPtr.Zero);
+        return new{时间=DateTimeOffset.Now,路径=snapshot.Paths.Select(p=>new{设备=Describe(p),源=p.Source,目标=p.Target,桌面模式=p.Source.ModeIndex<snapshot.Modes.Length?snapshot.Modes[p.Source.ModeIndex]:(DisplayMode?)null}).ToArray(),监视器=monitors};
+    }
     [DllImport("dxva2.dll",SetLastError=true)] static extern bool GetNumberOfPhysicalMonitorsFromHMONITOR(IntPtr monitor,out uint count);
     [DllImport("dxva2.dll",SetLastError=true)] static extern bool GetPhysicalMonitorsFromHMONITOR(IntPtr monitor,uint count,[Out] PhysicalMonitor[] physical);
     [DllImport("dxva2.dll")] static extern bool DestroyPhysicalMonitors(uint count,PhysicalMonitor[] physical);

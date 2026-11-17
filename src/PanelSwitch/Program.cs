@@ -8,6 +8,8 @@ static class Program {
     [STAThread] static int Main(string[] args) {
         try {
             Directory.CreateDirectory(Storage.Root);
+            if(args.Contains("--calibrate-virtual-dpi"))return IntegrationTests.Run(args[1],2,false,true);
+            if(args.Contains("--display-parameters")){Storage.Save(args[1],DisplayNative.Parameters());return 0;}
             if(args.Contains("--desktop-status")){Storage.Save(args[1],DesktopRefresh.Describe());return 0;}
             if(args.Contains("--desktop-refresh-worker"))return DesktopRefresh.RunWorker(args[1]);
             if(args.Contains("--desktop-refresh-test")){var before=DesktopRefresh.Describe();int count=DesktopRefresh.RepaintOnce();Storage.Save(args[1],new{刷新前=before,重绘视图数=count,刷新后=DesktopRefresh.Describe()});return count>0?0:1;}

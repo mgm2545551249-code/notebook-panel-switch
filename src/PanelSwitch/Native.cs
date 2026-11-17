@@ -42,11 +42,14 @@ public sealed class WindowPlacement {
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool GetWindowPlacement(IntPtr hwnd,ref Placement placement);
     [DllImport("user32.dll")] static extern bool SetWindowPlacement(IntPtr hwnd,ref Placement placement);
+    [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd,out uint pid);
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd,StringBuilder text,int max);
     internal static bool IsShellSurface(string name)=>name=="Progman"||name=="WorkerW"||name=="Shell_TrayWnd"||name=="Shell_SecondaryTrayWnd";
     internal static bool IsShellSurface(IntPtr hwnd){var name=new StringBuilder(256);GetClassName(hwnd,name,name.Capacity);return IsShellSurface(name.ToString());}
     public static WindowPlacement[] Capture() {
+        var previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try{
         var result=new List<WindowPlacement>();
         EnumWindows((h,_)=>{try{
             if(!IsWindowVisible(h)||IsShellSurface(h))return true;
@@ -54,13 +57,24 @@ public sealed class WindowPlacement {
             GetWindowThreadProcessId(h,out uint pid);using var process=Process.GetProcessById((int)pid);
             if(GetWindowPlacement(h,ref p))result.Add(new(){Handle=h.ToInt64(),ProcessId=(int)pid,ProcessStarted=process.StartTime.ToUniversalTime().Ticks,Position=p});
         }catch{}return true;},IntPtr.Zero);return result.ToArray();
+        }finally{if(previous!=IntPtr.Zero)SetThreadDpiAwarenessContext(previous);}
     }
     public static void RestoreAll(WindowPlacement[] windows) {
+        var previous=SetThreadDpiAwarenessContext(new IntPtr(-4));
+        try{
         foreach(var w in windows)try{
             var h=new IntPtr(w.Handle);if(IsShellSurface(h))continue;GetWindowThreadProcessId(h,out uint pid);if(pid!=w.ProcessId)continue;
             using var process=Process.GetProcessById((int)pid);if(process.StartTime.ToUniversalTime().Ticks!=w.ProcessStarted)continue;
-            var p=w.Position;p.Length=(uint)Marshal.SizeOf<Placement>();SetWindowPlacement(h,ref p);
+            var p=w.Position;p.Length=(uint)Marshal.SizeOf<Placement>();
+            var current=new Placement{Length=(uint)Marshal.SizeOf<Placement>()};
+            if(GetWindowPlacement(h,ref current)&&current.ShowCommand==p.ShowCommand&&
+                current.Normal.Left==p.Normal.Left&&current.Normal.Top==p.Normal.Top&&
+                current.Normal.Right==p.Normal.Right&&current.Normal.Bottom==p.Normal.Bottom)continue;
+            // 避免恢复普通窗口时抢夺用户当前焦点。
+            if(p.ShowCommand==1)p.ShowCommand=4;
+            if(!SetWindowPlacement(h,ref p))Storage.Log("窗口位置恢复失败",new{w.Handle,错误=Marshal.GetLastWin32Error()});
         }catch{}
+        }finally{if(previous!=IntPtr.Zero)SetThreadDpiAwarenessContext(previous);}
     }
 }
 

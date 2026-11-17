@@ -69,6 +69,7 @@ internal sealed class Controller {
             if(selected==null)throw new InvalidOperationException(Message);
             State=PanelState.正在关闭;Changed?.Invoke();
             var candidate=selected.Prepare();
+            Storage.Log("关屏前显示参数",DisplayNative.Parameters());
             using(var process=Process.GetCurrentProcess()){candidate.OwnerPid=process.Id;candidate.OwnerStarted=process.StartTime.ToUniversalTime().Ticks;}
             candidate.BootId=Recovery.BootId;
             candidate.Deadline=seconds.HasValue?DateTimeOffset.Now.AddSeconds(seconds.Value):null;
@@ -81,6 +82,7 @@ internal sealed class Controller {
             if(!File.Exists(candidate.Ready))throw new InvalidOperationException("独立恢复进程尚未就绪，已取消关屏。");
             if(settings.KeepAwake)Native.Awake(true);
             selected.Off(candidate);
+            Storage.Log("关屏后显示参数",DisplayNative.Parameters());
             if(!selected.IsOff(candidate))throw new InvalidOperationException("关屏命令后状态校验未通过，正在恢复。");
             State=PanelState.关闭;Message=seconds.HasValue?$"内屏测试中，最多 {seconds} 秒后恢复。":"内屏已关闭，使用快捷键恢复。";Storage.Log("关屏成功",new{candidate.Method,candidate.Id});
         }catch(Exception e){Storage.Log("切换失败",e.ToString());try{await Restore();}catch(Exception recovery){Storage.Log("恢复失败",recovery.ToString());}State=PanelState.故障;Message=e.Message;}
