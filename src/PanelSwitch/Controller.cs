@@ -15,8 +15,10 @@ internal interface IPanelBackend {
 }
 internal sealed class TopologyBackend:IPanelBackend {
     public string Name=>"布局";
-    public RecoveryLease Prepare(){var snapshot=DisplayNative.Query();DisplayNative.Validate(DisplayNative.ExternalOnly(snapshot));return new(){Method=Name,Original=snapshot,Windows=WindowPlacement.Capture()};}
-    public void Off(RecoveryLease l)=>DisplayNative.Apply(DisplayNative.ExternalOnly(l.Original));
+    readonly bool allowVirtual;
+    public TopologyBackend(bool allowVirtual=true){this.allowVirtual=allowVirtual;}
+    public RecoveryLease Prepare(){var snapshot=DisplayNative.Query();DisplayNative.Validate(DisplayNative.OffLayout(snapshot,allowVirtual));return new(){Method=Name,Original=snapshot,Windows=WindowPlacement.Capture()};}
+    public void Off(RecoveryLease l)=>DisplayNative.Apply(DisplayNative.OffLayout(l.Original,allowVirtual));
     public void On(RecoveryLease l)=>Recovery.Restore(l);
     public bool IsOff(RecoveryLease l)=>!DisplayNative.Query().Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology));
 }
@@ -51,8 +53,8 @@ internal sealed class Controller {
         backend=null;
         if(panels.Length!=1){Message="未找到唯一内屏，请检查显示设备。";Changed?.Invoke();return;}
         var physicalExternal=endpoints.Any(x=>!x.Internal&&!IsVirtual(x));
-        bool virtualExternal=settings.AllowVirtualDisplay&&endpoints.Any(x=>!x.Internal);
-        if(physicalExternal||virtualExternal){backend=new TopologyBackend();Message=physicalExternal?"关闭内屏后，外接屏和键鼠继续工作。":"虚拟显示器已就绪，可独立关闭笔记本内屏。";}
+        bool virtualExternal=settings.AllowVirtualDisplay&&(endpoints.Any(IsVirtual)||DisplayNative.Query(true).Paths.Select(DisplayNative.Describe).Any(x=>x.Available&&IsVirtual(x)));
+        if(physicalExternal||virtualExternal){backend=new TopologyBackend(settings.AllowVirtualDisplay);Message=physicalExternal?"关闭内屏后，外接屏和键鼠继续工作。":"虚拟显示器可用，关屏时按需启用。";}
         else if(settings.ConfirmedDdcDevice==panels[0].DevicePath&&settings.ConfirmedDdcDriver==Diagnostics.DriverFingerprint()){
             var cap=DisplayNative.ProbeDdc(panels[0].GdiName);
             if(cap.Count==1&&cap[0].PowerReadable){backend=new DdcBackend(panels[0]);Message="使用已现场验证的内屏电源接口。";}

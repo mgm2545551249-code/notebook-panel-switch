@@ -102,6 +102,29 @@ internal static class DisplayNative {
         GetSourceName(ref s);
         return new(Key(p),rc==0?t.FriendlyName:"未知显示器",rc==0?t.DevicePath:"",s.Name??"",p.Target.Technology,IsInternal(p.Target.Technology),p.Target.Available!=0,(p.Flags&1)!=0);
     }
+    internal static void HideIdleVirtual() {
+        if(System.IO.File.Exists(Storage.LeasePath))return;
+        var active=Query();
+        var retained=active.Paths.Where(p=>!Controller.IsVirtual(Describe(p))).ToArray();
+        if(retained.Length==active.Paths.Length||!retained.Any(p=>IsInternal(p.Target.Technology)))return;
+        Apply(new(){Paths=retained,Modes=active.Modes});
+    }
+    internal static DisplaySnapshot OffLayout(DisplaySnapshot original,bool allowVirtual) {
+        var physical=original.Paths.Where(p=>!IsInternal(p.Target.Technology)&&!Controller.IsVirtual(Describe(p))).ToArray();
+        if(physical.Length>0)return ExternalOnly(new(){Paths=physical,Modes=original.Modes});
+        if(!allowVirtual)throw new InvalidOperationException("没有可用物理外接屏，且未启用虚拟屏模式。");
+        if(original.Paths.Any(p=>Controller.IsVirtual(Describe(p))))return ExternalOnly(original);
+        var panel=original.Paths.Single(p=>IsInternal(p.Target.Technology));
+        if(panel.Source.ModeIndex>=original.Modes.Length)throw new InvalidOperationException("无法读取内屏桌面模式。");
+        foreach(var item in Query(true).Paths.Where(p=>p.Target.Available!=0&&Controller.IsVirtual(Describe(p)))) {
+            var path=item;path.Flags=1;path.Source.ModeIndex=0;path.Target.ModeIndex=uint.MaxValue;
+            var mode=original.Modes[panel.Source.ModeIndex];
+            mode.Adapter=path.Source.Adapter;mode.Id=path.Source.Id;mode.Source.Position=default;
+            var candidate=new DisplaySnapshot{Paths=new[]{path},Modes=new[]{mode}};
+            try{Validate(candidate);return candidate;}catch(Win32Exception){}
+        }
+        throw new InvalidOperationException("没有通过布局验证的虚拟屏，已保留内屏。");
+    }
     public static DisplaySnapshot ExternalOnly(DisplaySnapshot original) {
         var paths=original.Paths.Where(p=>(p.Flags&1)!=0&&!IsInternal(p.Target.Technology)).ToArray();
         if(paths.Length==0)throw new InvalidOperationException("当前没有可用外接屏，禁止停用唯一显示路径。");

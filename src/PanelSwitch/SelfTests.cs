@@ -11,6 +11,11 @@ internal static class SelfTests {
         void Assert(bool ok,string reason){if(!ok)throw new Exception(reason);}
         Test("显示结构与原生接口尺寸一致",()=>{Assert(Marshal.SizeOf<DisplayPath>()==72,"路径结构长度错误");Assert(Marshal.SizeOf<DisplayMode>()==64,"模式结构长度错误");});
         var snapshot=DisplayNative.Query();
+        Test("虚拟屏未获允许时保留唯一内屏",()=>{
+            var single=new DisplaySnapshot{Paths=new[]{new DisplayPath{Flags=1,Target=new(){Technology=11}}}};
+            try{DisplayNative.OffLayout(single,false);}catch(InvalidOperationException){return;}
+            throw new Exception("未拒绝无备用目标的关屏");
+        });
         Test("当前显示布局只验证而不应用",()=>DisplayNative.Validate(snapshot));
         Test("恢复记录序列化保留全部模式字节",()=>{var copy=JsonSerializer.Deserialize<DisplaySnapshot>(JsonSerializer.Serialize(snapshot,Storage.Json),Storage.Json)!;Assert(Bytes(snapshot.Modes).SequenceEqual(Bytes(copy.Modes)),"模式字节变化");Assert(Bytes(snapshot.Paths).SequenceEqual(Bytes(copy.Paths)),"路径字节变化");});
         Test("唯一内屏禁止停用",()=>{var single=new DisplaySnapshot{Paths=new[]{new DisplayPath{Flags=1,Target=new(){Technology=11}}}};try{DisplayNative.ExternalOnly(single);}catch(InvalidOperationException){return;}throw new Exception("错误地允许停用唯一内屏");});
