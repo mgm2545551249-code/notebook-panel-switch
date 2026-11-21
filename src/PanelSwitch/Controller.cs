@@ -17,7 +17,7 @@ internal sealed class TopologyBackend:IPanelBackend {
     public string Name=>"布局";
     readonly bool allowVirtual;
     public TopologyBackend(bool allowVirtual=true){this.allowVirtual=allowVirtual;}
-    public RecoveryLease Prepare(){var snapshot=DisplayNative.Query();DisplayNative.Validate(DisplayNative.OffLayout(snapshot,allowVirtual));return new(){Method=Name,Original=snapshot,Windows=WindowPlacement.Capture()};}
+    public RecoveryLease Prepare(){var snapshot=DisplayNative.RecoveryLayout(DisplayNative.Query());DisplayNative.Validate(DisplayNative.OffLayout(snapshot,allowVirtual));return new(){Method=Name,Original=snapshot,Windows=WindowPlacement.Capture()};}
     public void Off(RecoveryLease l)=>DisplayNative.Apply(DisplayNative.OffLayout(l.Original,allowVirtual));
     public void On(RecoveryLease l)=>Recovery.Restore(l);
     public bool IsOff(RecoveryLease l)=>!DisplayNative.Query().Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology));
@@ -41,7 +41,7 @@ internal sealed class Controller {
     public PanelState State{get;private set;}=PanelState.开启;
     public string Message{get;private set;}="正在检测内屏控制能力。";
     public event Action? Changed;
-    IPanelBackend? backend;RecoveryLease? lease;bool busy;
+    IPanelBackend? backend;RecoveryLease? lease;bool busy,forcing,emergencyQueued;
     public bool IsBusy=>busy;
     public bool HasRecovery=>lease!=null;
     readonly Settings settings;
@@ -51,9 +51,10 @@ internal sealed class Controller {
         var endpoints=DisplayNative.Query().Paths.Select(DisplayNative.Describe).ToArray();
         var panels=endpoints.Where(x=>x.Internal).ToArray();
         backend=null;
-        if(panels.Length!=1){Message="未找到唯一内屏，请检查显示设备。";Changed?.Invoke();return;}
+        if(panels.Length!=1){State=PanelState.故障;Message="未检测到唯一活动内屏，可用紧急恢复切回仅内屏。";Changed?.Invoke();return;}
+        State=PanelState.开启;
         var physicalExternal=endpoints.Any(x=>!x.Internal&&!IsVirtual(x));
-        bool virtualExternal=settings.AllowVirtualDisplay&&(endpoints.Any(IsVirtual)||DisplayNative.Query(true).Paths.Select(DisplayNative.Describe).Any(x=>x.Available&&IsVirtual(x)));
+        bool virtualExternal=settings.AllowVirtualDisplay&&(endpoints.Any(DisplayNative.IsManagedVirtual)||DisplayNative.Query(true).Paths.Select(DisplayNative.Describe).Any(x=>x.Available&&DisplayNative.IsManagedVirtual(x)));
         if(physicalExternal||virtualExternal){backend=new TopologyBackend(settings.AllowVirtualDisplay);Message=physicalExternal?"关闭内屏后，外接屏和键鼠继续工作。":"虚拟显示器可用，关屏时按需启用。";}
         else if(settings.ConfirmedDdcDevice==panels[0].DevicePath&&settings.ConfirmedDdcDriver==Diagnostics.DriverFingerprint()){
             var cap=DisplayNative.ProbeDdc(panels[0].GdiName);
@@ -84,22 +85,37 @@ internal sealed class Controller {
             while(!File.Exists(candidate.Ready)&&watch.Elapsed<TimeSpan.FromSeconds(8))await Task.Delay(100);
             if(!File.Exists(candidate.Ready))throw new InvalidOperationException("独立恢复进程尚未就绪，已取消关屏。");
             if(settings.KeepAwake)Native.Awake(true);
-            selected.Off(candidate);
+            if(emergencyQueued)return;
+            Recovery.RunWhileCurrent(candidate,()=>selected.Off(candidate));
             Storage.Log("关屏后显示参数",DisplayNative.Parameters());
             Storage.Save(Path.Combine(Storage.Root,"最近关屏后显示参数.json"),DisplayNative.Parameters());
             if(!selected.IsOff(candidate))throw new InvalidOperationException("关屏命令后状态校验未通过，正在恢复。");
             State=PanelState.关闭;Message=seconds.HasValue?$"内屏测试中，最多 {seconds} 秒后恢复。":"内屏已关闭，使用快捷键恢复。";Storage.Log("关屏成功",new{candidate.Method,candidate.Id});
         }catch(Exception e){Storage.Log("切换失败",e.ToString());try{await Restore();}catch(Exception recovery){Storage.Log("恢复失败",recovery.ToString());}State=PanelState.故障;Message=e.Message;}
-        finally{busy=false;Changed?.Invoke();}
+        finally{busy=false;Changed?.Invoke();if(emergencyQueued)await ForceRestore();}
     }
     void RefreshForToggle(){if(backend is BaselineBackend||backend is DdcBackend)backend=null;bool previous=busy;busy=false;try{Refresh();}finally{busy=previous;}}
     public async Task Restore() {
-        if(lease==null)return;
+        if(lease==null||forcing)return;
         State=PanelState.正在恢复;Changed?.Invoke();var current=lease;
         Recovery.Complete(current,Storage.LeasePath);
         Native.Awake(false);lease=null;State=PanelState.开启;Message="内屏已恢复。";
         foreach(var p in new[]{current.Heartbeat,current.Ready})try{File.Delete(p);}catch{}
         Changed?.Invoke();await Task.CompletedTask;
+    }
+    public async Task ForceRestore(){
+        if(forcing)return;
+        if(busy){emergencyQueued=true;return;}
+        emergencyQueued=false;busy=forcing=true;State=PanelState.正在恢复;Changed?.Invoke();
+        try{
+            await Task.Run(Recovery.ForceInternal);
+            var previous=lease;lease=null;
+            if(previous!=null)foreach(var p in new[]{previous.Heartbeat,previous.Ready})try{File.Delete(p);}catch{}
+            Native.Awake(false);
+            State=PanelState.开启;Message="紧急恢复成功：已切回仅内屏。";
+            DesktopRefresh.AfterLayoutRestored();
+        }catch(Exception e){State=PanelState.故障;Message=e.Message;Storage.Log("紧急恢复失败",e.ToString());}
+        finally{busy=forcing=emergencyQueued=false;Changed?.Invoke();}
     }
     public async Task Tick() {
         if(lease==null||busy)return;
@@ -109,12 +125,12 @@ internal sealed class Controller {
         if(lease.Deadline.HasValue&&DateTimeOffset.Now>=lease.Deadline){await Restore();return;}
         if(lease.Method=="布局"){
             var active=DisplayNative.Query().Paths;
-            if(!active.Any(p=>!DisplayNative.IsInternal(p.Target.Technology))){await Restore();}
+            if(active.Any(p=>DisplayNative.IsInternal(p.Target.Technology))||!active.Any(p=>!DisplayNative.IsInternal(p.Target.Technology))){await Restore();}
         }
     }
     public async Task EnvironmentChanged() {
         if(busy)return;
         if(lease!=null){if(lease.Method=="布局"&&!backend!.IsOff(lease))await Restore();else await Tick();}
-        else Refresh();
+        else {DisplayNative.HideIdleVirtual();Refresh();}
     }
 }

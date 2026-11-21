@@ -16,12 +16,15 @@ internal static class IntegrationTests {
     }
     [DllImport("user32.dll")] static extern void mouse_event(uint flags,int dx,int dy,uint data,UIntPtr extra);
     static bool Same(DisplaySnapshot a,DisplaySnapshot b)=>a.Paths.Select(DisplayNative.Key).OrderBy(x=>x).SequenceEqual(b.Paths.Select(DisplayNative.Key).OrderBy(x=>x));
-    public static int Run(string output,int cycles,bool baseline=false,bool calibrate=false) {
+    public static int Run(string output,int cycles,bool baseline=false,bool calibrate=false,bool emergency=false) {
         int completed=0;int result=1;var app=new System.Windows.Application{ShutdownMode=System.Windows.ShutdownMode.OnExplicitShutdown};
         app.Startup+=async(_,_)=>{
             var initial=DisplayNative.Query();var logs=new List<object>();var settings=new Settings{AllowVirtualDisplay=true};var controller=new Controller(settings);
             int desired=calibrate?DisplayDpi.Percent(initial.Paths.First(p=>DisplayNative.IsInternal(p.Target.Technology))):0;
             try{
+                if(emergency&&(File.Exists(Storage.LeasePath)||!initial.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology))||
+                    initial.Paths.Select(DisplayNative.Describe).Any(x=>!x.Internal&&!DisplayNative.IsManagedVirtual(x))))
+                    throw new InvalidOperationException("紧急实测要求内屏活动、无恢复记录且没有其他外接目标。");
                 for(int i=0;i<cycles;i++){
                     var watch=Stopwatch.StartNew();controller.Refresh();await controller.Toggle(15,baseline?new BaselineBackend():null);
                     if(controller.State!=PanelState.关闭)throw new Exception("关屏失败："+controller.Message);
@@ -41,10 +44,14 @@ internal static class IntegrationTests {
                     mouse_event(1,2,0,0,UIntPtr.Zero);for(int t=0;t<(i==0?20:1);t++){await Task.Delay(200);await controller.Tick();}mouse_event(1,-2,0,0,UIntPtr.Zero);
                     var afterInput=DisplayNative.Query();bool remained=baseline?true:!afterInput.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology));
                     if(!remained)throw new Exception("普通鼠标输入后内屏重新启用");
-                    await controller.Restore();var restored=DisplayNative.Query();if(!Same(initial,restored))throw new Exception("原始显示路径未恢复");
-                    logs.Add(new{轮次=i+1,关闭后路径=off.Paths.Select(DisplayNative.Describe).ToArray(),鼠标输入后内屏路径仍停用=!afterInput.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology)),恢复后路径一致=true,耗时毫秒=watch.ElapsedMilliseconds});
+                    bool force=emergency&&i!=0;
+                    if(force)await controller.ForceRestore();else await controller.Restore();
+                    var restored=DisplayNative.Query();
+                    if(!Same(DisplayNative.RecoveryLayout(initial),restored)||File.Exists(Storage.LeasePath))throw new Exception("内屏恢复、虚拟屏清理或恢复记录清理未通过："+controller.Message);
+                    logs.Add(new{轮次=i+1,紧急恢复=force,关闭后路径=off.Paths.Select(DisplayNative.Describe).ToArray(),鼠标输入后内屏路径仍停用=!afterInput.Paths.Any(p=>DisplayNative.IsInternal(p.Target.Technology)),恢复后路径一致=true,恢复后路径=restored.Paths.Select(DisplayNative.Describe).ToArray(),耗时毫秒=watch.ElapsedMilliseconds});
                     completed++;await Task.Delay(120);
                 }
+                if(emergency){await controller.ForceRestore();DisplayNative.WaitForInternal(true);if(controller.State!=PanelState.开启)throw new Exception("无记录紧急恢复失败："+controller.Message);logs.Add(new{无记录紧急恢复=true,活动内屏=DisplayNative.Query().Paths.Select(DisplayNative.Describe).ToArray()});}
                 result=0;
             }catch(Exception e){logs.Add(new{错误=e.ToString()});try{await controller.Restore();}catch{} }
             finally{Storage.Save(output,new{时间=DateTimeOffset.Now,类型=baseline?"常规关屏对照":"真实显示布局开关",请求轮次=cycles,完成轮次=completed,退出码=result,日志=logs,最终路径=DisplayNative.Query().Paths.Select(DisplayNative.Describe),说明="路径停用与鼠标输入状态已由软件检查；面板是否停止发光仍需现场观察确认。"});app.Shutdown(result);}
@@ -56,6 +63,6 @@ internal static class IntegrationTests {
     }
     public static int Timeout(string output){
         int code=1;var app=new System.Windows.Application{ShutdownMode=System.Windows.ShutdownMode.OnExplicitShutdown};
-        app.Startup+=async(_,_)=>{var before=DisplayNative.Query();var c=new Controller(new Settings{AllowVirtualDisplay=true});try{c.Refresh();await c.Toggle(3);bool off=c.State==PanelState.关闭;var watch=Stopwatch.StartNew();while(File.Exists(Storage.LeasePath)&&watch.Elapsed<TimeSpan.FromSeconds(25))await Task.Delay(300);var after=DisplayNative.Query();bool restored=Same(before,after)&&!File.Exists(Storage.LeasePath);await c.Tick();code=off&&restored?0:1;Storage.Save(output,new{时间=DateTimeOffset.Now,确实关闭=off,独立进程自动恢复=restored,退出码=code});}finally{await c.Restore();app.Shutdown(code);}};app.Run();return code;
+        app.Startup+=async(_,_)=>{var before=DisplayNative.RecoveryLayout(DisplayNative.Query());var c=new Controller(new Settings{AllowVirtualDisplay=true});try{c.Refresh();await c.Toggle(3);bool off=c.State==PanelState.关闭;var watch=Stopwatch.StartNew();while(File.Exists(Storage.LeasePath)&&watch.Elapsed<TimeSpan.FromSeconds(25))await Task.Delay(300);var after=DisplayNative.Query();bool restored=Same(before,after)&&!File.Exists(Storage.LeasePath);await c.Tick();code=off&&restored?0:1;Storage.Save(output,new{时间=DateTimeOffset.Now,确实关闭=off,独立进程自动恢复=restored,退出码=code});}finally{await c.Restore();app.Shutdown(code);}};app.Run();return code;
     }
 }

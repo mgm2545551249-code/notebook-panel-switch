@@ -27,6 +27,8 @@ static class Program {
             if(args.Contains("--crash-test"))return IntegrationTests.Crash(args[1]);
             if(args.Contains("--timeout-test"))return IntegrationTests.Timeout(args[1]);
             if(args.Contains("--internal-only")){DisplayNative.InternalOnly();return 0;}
+            if(args.Contains("--force-recover")){Recovery.ForceInternal();return 0;}
+            if(args.Contains("--emergency-test"))return IntegrationTests.Run(args[1],2,emergency:true);
             if(args.Contains("--install-vdd"))return VddInstaller.InstallElevated().GetAwaiter().GetResult();
             if(args.Contains("--remove-vdd"))return VddInstaller.InstallElevated(true).GetAwaiter().GetResult();
             if(args.Contains("--install"))return Install.Run();

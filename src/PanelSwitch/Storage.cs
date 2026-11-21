@@ -64,15 +64,18 @@ internal static class Recovery {
     public static void Restore(RecoveryLease lease) {
         // 显示器热插拔或重启后，旧适配器标识可能失效，改用当前内屏布局恢复。
         if(lease.Method=="布局") {
-            try{DisplayNative.Apply(lease.Original);}catch{DisplayNative.EmergencyInternal();}
+            try{DisplayNative.Apply(DisplayNative.RecoveryLayout(lease.Original));DisplayNative.WaitForInternal();}
+            catch(Exception e){Storage.Log("原布局恢复失败，改用仅内屏",e.Message);DisplayNative.InternalOnly();}
             // 图标先补绘，不被等待显示稳定和逐个应用恢复阻塞。
             DesktopRefresh.AfterLayoutRestored();
             WaitForDisplaySettlement();
+            DisplayNative.RemoveManagedVirtual();
+            DisplayNative.WaitForInternal();
             WindowPlacement.RestoreAll(lease.Windows);
             DesktopRefresh.AfterLayoutRestored();
         } else if(lease.Method=="内屏电源") {
             var target=System.Linq.Enumerable.FirstOrDefault(System.Linq.Enumerable.Select(DisplayNative.Query().Paths,DisplayNative.Describe),p=>string.Equals(p.DevicePath,lease.DevicePath,StringComparison.OrdinalIgnoreCase));
-            if(target!=null)DisplayNative.DdcPower(target.GdiName,1);else DisplayNative.EmergencyInternal();
+            if(target!=null)DisplayNative.DdcPower(target.GdiName,1);else DisplayNative.InternalOnly();
         } else if(lease.Method=="常规诊断") Native.MonitorPower(-1);
         if(lease.PowerPolicy!=null)PowerPolicy.Restore(lease.PowerPolicy);
         Storage.Log("恢复成功",new{lease.Id,lease.Method});
@@ -94,11 +97,37 @@ internal static class Recovery {
         Complete(lease,Storage.LeasePath);return true;
     }
     public static void Complete(RecoveryLease lease,string path) {
+        WithGate(()=>{
+            if(Storage.Load<RecoveryLease>(path)?.Id!=lease.Id)return;
+            Restore(lease);if(Storage.Load<RecoveryLease>(path)?.Id==lease.Id)File.Delete(path);
+        });
+    }
+    internal static void RunWhileCurrent(RecoveryLease lease,Action action){
+        WithGate(()=>{
+            if(Storage.Load<RecoveryLease>(Storage.LeasePath)?.Id!=lease.Id)throw new InvalidOperationException("恢复流程已取消本次关屏。");
+            action();
+        });
+    }
+    internal static void ForceInternal(){
+        WithGate(()=>{
+            RecoveryLease? lease=null;
+            try{lease=Storage.Load<RecoveryLease>(Storage.LeasePath);}
+            catch(Exception e){Storage.Log("紧急恢复忽略损坏记录",e.Message);}
+            if(lease?.Method=="内屏电源"){
+                try{Restore(lease);}catch(Exception e){Storage.Log("内屏电源唤醒未确认",e.Message);}
+            }
+            Native.MonitorPower(-1);
+            DisplayNative.InternalOnly();
+            File.Delete(Storage.LeasePath);
+            if(lease?.PowerPolicy!=null)try{PowerPolicy.Restore(lease.PowerPolicy);}catch(Exception e){Storage.Log("电源策略还原失败",e.Message);}
+            Storage.Log("紧急恢复已确认",new{来源="仅内屏系统模式",恢复记录=lease!=null});
+        });
+    }
+    static void WithGate(Action action) {
         using var gate=new Mutex(false,"Local\\PanelSwitch.Recovery");bool held=false;
         try{try{held=gate.WaitOne(TimeSpan.FromSeconds(25));}catch(AbandonedMutexException){held=true;}
             if(!held)throw new TimeoutException("另一个恢复进程尚未完成。");
-            if(Storage.Load<RecoveryLease>(path)?.Id!=lease.Id)return;
-            Restore(lease);if(Storage.Load<RecoveryLease>(path)?.Id==lease.Id)File.Delete(path);
+            action();
         }finally{if(held)gate.ReleaseMutex();}
     }
     public static int Watch(string leasePath,string id) {

@@ -11,6 +11,21 @@ internal static class SelfTests {
         void Assert(bool ok,string reason){if(!ok)throw new Exception(reason);}
         Test("显示结构与原生接口尺寸一致",()=>{Assert(Marshal.SizeOf<DisplayPath>()==72,"路径结构长度错误");Assert(Marshal.SizeOf<DisplayMode>()==64,"模式结构长度错误");});
         var snapshot=DisplayNative.Query();
+        Test("恢复布局只移除本工具的虚拟屏，并保留其他显示器",()=>{
+            var panel=new DisplayPath{Flags=1,Source=new(){ModeIndex=0},Target=new(){Technology=11,Id=1}};
+            var managed=new DisplayPath{Flags=1,Source=new(){ModeIndex=1},Target=new(){Technology=5,Id=2}};
+            var external=new DisplayPath{Flags=1,Source=new(){ModeIndex=2},Target=new(){Technology=5,Id=3}};
+            var original=new DisplaySnapshot{Paths=new[]{panel,managed,external},Modes=new[]{new DisplayMode{Type=1,Source=new(){Position=new(){X=2560}}},new DisplayMode{Type=1},new DisplayMode{Type=1,Source=new(){Position=new(){X=5120}}}}};
+            var clean=DisplayNative.WithoutManagedVirtual(original,p=>p.Target.Id==2);
+            Assert(clean.Paths.Select(p=>p.Target.Id).SequenceEqual(new uint[]{1,3})&&original.Paths.Length==3,"删除了其他屏幕或修改原记录");
+            Assert(clean.Modes[0].Source.Position.X==0&&clean.Modes[2].Source.Position.X==2560&&original.Modes[0].Source.Position.X==2560,"未保留相对位置");
+            var off=new DisplaySnapshot{Paths=new[]{managed}};
+            Assert(ReferenceEquals(DisplayNative.WithoutManagedVirtual(off,_=>true),off),"没有活动内屏时错误地删除了最后一个显示目标");
+        });
+        Test("管理范围不包含伪装成物理显示器的远控虚拟屏",()=>{
+            Assert(DisplayNative.IsManagedVirtual(new("","VDD by MTT",@"\\?\DISPLAY#MTT1337#1","",5,false,true,true)),"未识别本工具使用的驱动");
+            Assert(!DisplayNative.IsManagedVirtual(new("","S2719DGF",@"\\?\DISPLAY#DELD0E6#1","",5,false,true,true)),"把其他驱动当作本工具的虚拟屏");
+        });
         Test("虚拟屏未获允许时保留唯一内屏",()=>{
             var single=new DisplaySnapshot{Paths=new[]{new DisplayPath{Flags=1,Target=new(){Technology=11}}}};
             try{DisplayNative.OffLayout(single,false);}catch(InvalidOperationException){return;}

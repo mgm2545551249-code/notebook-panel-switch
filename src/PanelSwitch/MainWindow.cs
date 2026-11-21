@@ -22,6 +22,10 @@ internal sealed class MainWindow:Window {
     readonly TextBlock status=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,8,0,12),Foreground=Brushes.DimGray};
     readonly TextBox diagnostic=new(){IsReadOnly=true,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,VerticalScrollBarVisibility=ScrollBarVisibility.Auto,MinHeight=130};
     readonly TextBox shortcut=new(){IsReadOnly=true,MinWidth=200};
+    const int EmergencyHotkeyId=20;
+    const uint EmergencyModifiers=3, EmergencyKey=0x7A;
+    readonly TextBlock emergencyHint=new(){TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,4,0,0)};
+    bool emergencyHotkeyRegistered;
     readonly TextBox environment=new(){IsReadOnly=true,TextWrapping=TextWrapping.Wrap,AcceptsReturn=true,Height=190,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};
     readonly CheckBox startup=new(){Content="登录后自动运行",Margin=new Thickness(0,8,0,0)};
     readonly CheckBox awake=new(){Content="关屏期间保持后台运行",Margin=new Thickness(0,8,0,0)};
@@ -52,6 +56,8 @@ internal sealed class MainWindow:Window {
         toggle=Button("关闭内屏",async()=>await controller.Toggle());toggle.Background=Brush("#128B86");toggle.Foreground=Brushes.White;toggle.BorderBrush=Brush("#128B86");toggle.MinWidth=130;actions.Children.Add(toggle);
         var test=Button("测试关屏 · 15 秒",async()=>await controller.Toggle(15));test.ToolTip="关闭内屏，并在十五秒后自动恢复";actions.Children.Add(test);
         actions.Children.Add(Button("恢复内屏",async()=>{await controller.Restore();Recovery.RestorePending();controller.Refresh();}));
+        var emergency=Button("紧急恢复（仅内屏）",controller.ForceRestore);actions.Children.Add(emergency);
+        heroContent.Children.Add(emergencyHint);
         heroContent.Children.Add(new TextBlock{Text="也可以短按电源键，或使用下方快捷键",FontSize=12,Foreground=Brush("#64837F"),Margin=new Thickness(0,5,0,0)});
         hero=Card(heroContent,"#E6F4EF");root.Children.Add(hero);
         var settingsPanel=new StackPanel();settingsPanel.Children.Add(SectionTitle("控制设置","选择你习惯的开关方式"));
@@ -92,10 +98,11 @@ internal sealed class MainWindow:Window {
         using(var iconStream=typeof(MainWindow).Assembly.GetManifestResourceStream("PanelSwitch.Assets.app.ico")){tray.Icon=iconStream!=null?new System.Drawing.Icon(iconStream):System.Drawing.SystemIcons.Application;}tray.Text="内屏开关";
         var menu=new Forms.ContextMenuStrip();menu.Items.Add("切换内屏",null,async(_,_)=>await Execute(()=>controller.Toggle()));menu.Items.Add("显示设置",null,(_,_)=>ShowSettings());menu.Items.Add("恢复内屏",null,async(_,_)=>await Execute(controller.Restore));menu.Items.Add("退出并恢复",null,async(_,_)=>await Exit());
         tray.ContextMenuStrip=menu;tray.DoubleClick+=(_,_)=>ShowSettings();tray.Visible=true;
+        menu.Items.Insert(3,new Forms.ToolStripMenuItem("紧急恢复（仅内屏）",null,async(_,_)=>await Execute(controller.ForceRestore)));
         SourceInitialized+=InitializedWindow;Loaded+=async(_,_)=>{if(background)Hide();if(!smoke)try{DisplayNative.HideIdleVirtual();}catch(Exception e){Storage.Log("停用空闲虚拟屏失败",e.Message);}await RefreshEnvironment();await RefreshDiagnostic();scroll.ScrollToTop();if(!smoke&&settings.EnablePowerButton)await Execute(StartPowerAgent);if(smoke){Storage.Save(Path.Combine(Storage.Root,"界面冒烟测试.json"),new{结果="通过",标题=Title,快捷键=shortcut.Text,状态=controller.State.ToString(),时间=DateTimeOffset.Now});await Exit();}};
         timer.Tick+=async(_,_)=>{if(ticking)return;ticking=true;try{if(powerAgent!=null)await powerAgent.Pulse();await controller.Tick();}catch(Exception e){Storage.Log("恢复监视异常",e.ToString());}finally{ticking=false;}};timer.Start();
         Closing+=(_,e)=>{if(!exiting){e.Cancel=true;Hide();}};
-        Closed+=(_,_)=>{timer.Stop();hotkey?.Dispose();buttonInput?.Dispose();if(powerNotification!=IntPtr.Zero)Native.UnregisterPowerSettingNotification(powerNotification);source?.RemoveHook(Hook);tray.Icon?.Dispose();tray.Dispose();};
+        Closed+=(_,_)=>{timer.Stop();hotkey?.Dispose();buttonInput?.Dispose();if(emergencyHotkeyRegistered&&source!=null)Native.UnregisterHotKey(source.Handle,EmergencyHotkeyId);if(powerNotification!=IntPtr.Zero)Native.UnregisterPowerSettingNotification(powerNotification);source?.RemoveHook(Hook);tray.Icon?.Dispose();tray.Dispose();};
     }
     static SolidColorBrush Brush(string color)=>(SolidColorBrush)new BrushConverter().ConvertFromString(color)!;
     static Border Card(UIElement child,string background="#FFFFFF")=>new(){Child=child,Background=Brush(background),BorderBrush=Brush("#E2EAF0"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(18),Padding=new Thickness(22),Margin=new Thickness(0,0,0,16)};
@@ -103,6 +110,10 @@ internal sealed class MainWindow:Window {
     static void AddSetting(StackPanel parent,CheckBox setting,string title,string description){setting.Content=SectionTitle(title,description);setting.Margin=new Thickness(0,9,0,0);System.Windows.Automation.AutomationProperties.SetName(setting,title);parent.Children.Add(new Border{Child=setting,BorderBrush=Brush("#EDF2F6"),BorderThickness=new Thickness(0,1,0,0),Padding=new Thickness(0,4,0,4)});}
     void InitializedWindow(object? sender,EventArgs e) {
         source=HwndSource.FromHwnd(new WindowInteropHelper(this).Handle);source.AddHook(Hook);hotkey=new(source.Handle);
+        emergencyHotkeyRegistered=Native.RegisterHotKey(source.Handle,EmergencyHotkeyId,EmergencyModifiers|0x4000,EmergencyKey);
+        string emergencyKeyText=DescribeKey(EmergencyModifiers,EmergencyKey);
+        emergencyHint.Text=emergencyHotkeyRegistered?$"紧急恢复：{emergencyKeyText}。切到仅内屏，当前外接屏也会退出显示。":$"紧急快捷键 {emergencyKeyText} 未注册，请用紧急恢复按钮，或按 Win＋P 选择“仅电脑屏幕”。";
+        Storage.Log("紧急恢复快捷键注册",new{快捷键=emergencyKeyText,成功=emergencyHotkeyRegistered});
         try{hotkey.Set(settings.Modifiers,settings.VirtualKey);}catch(Exception error){diagnostic.Text=error.Message;}
         buttonInput=new(source.Handle);buttonInput.Pressed+=async()=>{
             powerButton.IsEnabled=true;
@@ -113,6 +124,7 @@ internal sealed class MainWindow:Window {
     }
     IntPtr Hook(IntPtr hwnd,int msg,IntPtr w,IntPtr l,ref bool handled) {
         if(msg==0x312&&w.ToInt32()==18){_=Execute(()=>controller.Toggle());handled=true;}
+        if(msg==0x312&&w.ToInt32()==EmergencyHotkeyId&&emergencyHotkeyRegistered){_=Execute(controller.ForceRestore);handled=true;}
         if(msg==0xff)buttonInput?.Input(l);
         if(msg==0x7e||msg==0x219)Dispatcher.BeginInvoke(async()=>await Execute(controller.EnvironmentChanged));
         if(msg==0x218){int evt=w.ToInt32();if(evt==0x8013&&l!=IntPtr.Zero)Storage.Log("控制台显示状态通知",Marshal.ReadInt32(l,20));if(evt==4)_=Execute(controller.Restore);if(evt==7||evt==18)Dispatcher.BeginInvoke(async()=>await Execute(controller.EnvironmentChanged));}

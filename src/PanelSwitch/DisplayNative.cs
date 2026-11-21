@@ -104,19 +104,30 @@ internal static class DisplayNative {
     }
     internal static void HideIdleVirtual() {
         if(System.IO.File.Exists(Storage.LeasePath))return;
+        RemoveManagedVirtual();
+    }
+    internal static bool IsManagedVirtual(DisplayEndpoint x)=>!x.Internal&&x.DevicePath.StartsWith(@"\\?\DISPLAY#MTT1337#",StringComparison.OrdinalIgnoreCase);
+    internal static DisplaySnapshot WithoutManagedVirtual(DisplaySnapshot snapshot,Func<DisplayPath,bool> managed) {
+        if(!snapshot.Paths.Any(p=>IsInternal(p.Target.Technology)))return snapshot;
+        var paths=snapshot.Paths.Where(p=>!managed(p)).ToArray();
+        if(paths.Length==snapshot.Paths.Length)return snapshot;
+        return Rebase(paths,snapshot.Modes);
+    }
+    internal static DisplaySnapshot RecoveryLayout(DisplaySnapshot snapshot)=>WithoutManagedVirtual(snapshot,p=>IsManagedVirtual(Describe(p)));
+    internal static void RemoveManagedVirtual() {
         var active=Query();
-        var retained=active.Paths.Where(p=>!Controller.IsVirtual(Describe(p))).ToArray();
-        if(retained.Length==active.Paths.Length||!retained.Any(p=>IsInternal(p.Target.Technology)))return;
-        Apply(new(){Paths=retained,Modes=active.Modes});
+        var clean=RecoveryLayout(active);
+        if(!ReferenceEquals(active,clean))Apply(clean);
     }
     internal static DisplaySnapshot OffLayout(DisplaySnapshot original,bool allowVirtual) {
         var physical=original.Paths.Where(p=>!IsInternal(p.Target.Technology)&&!Controller.IsVirtual(Describe(p))).ToArray();
         if(physical.Length>0)return ExternalOnly(new(){Paths=physical,Modes=original.Modes});
         if(!allowVirtual)throw new InvalidOperationException("没有可用物理外接屏，且未启用虚拟屏模式。");
-        if(original.Paths.Any(p=>Controller.IsVirtual(Describe(p))))return ExternalOnly(original);
+        var managed=original.Paths.Where(p=>IsManagedVirtual(Describe(p))).ToArray();
+        if(managed.Length>0)return ExternalOnly(new(){Paths=managed,Modes=original.Modes});
         var panel=original.Paths.Single(p=>IsInternal(p.Target.Technology));
         if(panel.Source.ModeIndex>=original.Modes.Length)throw new InvalidOperationException("无法读取内屏桌面模式。");
-        foreach(var item in Query(true).Paths.Where(p=>p.Target.Available!=0&&Controller.IsVirtual(Describe(p)))) {
+        foreach(var item in Query(true).Paths.Where(p=>p.Target.Available!=0&&IsManagedVirtual(Describe(p)))) {
             var path=item;path.Flags=1;path.Source.ModeIndex=0;path.Target.ModeIndex=uint.MaxValue;
             var mode=original.Modes[panel.Source.ModeIndex];
             mode.Adapter=path.Source.Adapter;mode.Id=path.Source.Id;mode.Source.Position=default;
@@ -128,12 +139,16 @@ internal static class DisplayNative {
     public static DisplaySnapshot ExternalOnly(DisplaySnapshot original) {
         var paths=original.Paths.Where(p=>(p.Flags&1)!=0&&!IsInternal(p.Target.Technology)).ToArray();
         if(paths.Length==0)throw new InvalidOperationException("当前没有可用外接屏，禁止停用唯一显示路径。");
-        // 删除内屏后，将剩余桌面整体平移，保留外接屏之间的位置关系。
-        var modes=(DisplayMode[])original.Modes.Clone();
-        var indices=paths.Select(p=>p.Source.ModeIndex).Where(i=>i<modes.Length).Distinct().ToArray();
-        int minX=indices.Length>0?indices.Min(i=>modes[i].Source.Position.X):0;
-        int minY=indices.Length>0?indices.Min(i=>modes[i].Source.Position.Y):0;
-        foreach(uint i in indices){var m=modes[i];m.Source.Position.X-=minX;m.Source.Position.Y-=minY;modes[i]=m;}
+        return Rebase(paths,original.Modes);
+    }
+    static DisplaySnapshot Rebase(DisplayPath[] paths,DisplayMode[] input) {
+        // 保留原主屏；若它被移除，将剩余目标整体平移而不改变相对位置。
+        var modes=(DisplayMode[])input.Clone();
+        var indices=paths.Select(p=>p.Source.ModeIndex).Where(i=>i<modes.Length&&modes[i].Type==1).Distinct().ToArray();
+        if(indices.Length>0&&!indices.Any(i=>modes[i].Source.Position.X==0&&modes[i].Source.Position.Y==0)){
+            var origin=modes[indices[0]].Source.Position;
+            foreach(uint i in indices){var m=modes[i];m.Source.Position.X-=origin.X;m.Source.Position.Y-=origin.Y;modes[i]=m;}
+        }
         return new(){Paths=paths,Modes=modes};
     }
     public static void Validate(DisplaySnapshot s)=>Check(SetDisplayConfig((uint)s.Paths.Length,s.Paths,(uint)s.Modes.Length,s.Modes,0x20|0x40|0x400),"验证显示布局");
@@ -143,7 +158,27 @@ internal static class DisplayNative {
         Check(SetDisplayConfig((uint)s.Paths.Length,s.Paths,(uint)s.Modes.Length,s.Modes,0x20|0x80|0x400),"应用显示布局");
     }
     public static void EmergencyInternal()=>Check(SetDisplayConfig(0,null,0,null,0x80|1),"恢复内屏显示布局");
-    public static void InternalOnly(){var current=Query();var paths=current.Paths.Where(p=>IsInternal(p.Target.Technology)).ToArray();if(paths.Length==0){EmergencyInternal();return;}Apply(new(){Paths=paths,Modes=current.Modes});}
+    public static void InternalOnly(){
+        // 先走系统的仅内屏模式：即使当前拓扑完全找不到内屏，也能发起恢复。
+        try{EmergencyInternal();WaitForInternal(true);return;}
+        catch(Exception e){Storage.Log("系统内屏模式未确认",e.Message);}
+        var current=Query(true);
+        foreach(var p in current.Paths.Where(p=>IsInternal(p.Target.Technology)).OrderByDescending(p=>p.Target.Available)){
+            var path=p;path.Flags=1;path.Source.ModeIndex=path.Target.ModeIndex=uint.MaxValue;
+            try{Apply(new(){Paths=new[]{path}});WaitForInternal(true);return;}
+            catch(Win32Exception e){Storage.Log("内屏候选恢复失败",e.NativeErrorCode);}
+            catch(InvalidOperationException e){Storage.Log("内屏候选恢复未确认",e.Message);}
+        }
+        throw new InvalidOperationException("Windows 尚未确认内屏恢复，请使用 Win＋P 选择“仅电脑屏幕”。");
+    }
+    internal static void WaitForInternal(bool only=false){
+        for(int i=0;i<10;i++){
+            var paths=Query().Paths;
+            if(paths.Any(p=>IsInternal(p.Target.Technology))&&(!only||paths.All(p=>IsInternal(p.Target.Technology))))return;
+            System.Threading.Thread.Sleep(150);
+        }
+        throw new InvalidOperationException("恢复后未检测到预期的内屏布局。");
+    }
     public static List<DdcCapability> ProbeDdc(string gdi) {
         var result=new List<DdcCapability>();
         Visit(gdi,(info,p)=>{

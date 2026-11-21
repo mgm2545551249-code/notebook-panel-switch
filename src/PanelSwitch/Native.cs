@@ -82,6 +82,7 @@ internal sealed class Hotkey:IDisposable {
     readonly IntPtr hwnd;uint modifiers,key;bool registered;
     internal Hotkey(IntPtr hwnd){this.hwnd=hwnd;}
     internal void Set(uint newModifiers,uint newKey) {
+        if(newModifiers==3&&newKey==0x7A)throw new ArgumentException("此组合键保留给紧急恢复内屏。");
         if(newKey<0x08||newKey>0xfe||newModifiers==0||newModifiers>15)throw new ArgumentException("请选择带修饰键的有效快捷键。");
         if(registered&&newModifiers==modifiers&&newKey==key)return;
         if(!Native.RegisterHotKey(hwnd,19,newModifiers|0x4000,newKey))throw new Win32Exception(Marshal.GetLastWin32Error(),"快捷键已被占用，请换一个组合。");
