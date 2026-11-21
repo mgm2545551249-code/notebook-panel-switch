@@ -34,6 +34,14 @@ internal static class Storage {
 public sealed class Settings {
     public uint Modifiers {get;set;}=3;
     public uint VirtualKey {get;set;}=0x79;
+    public uint EmergencyModifiers {get;set;}=3;
+    public uint EmergencyVirtualKey {get;set;}=0x7A;
+    internal Settings WithHotkeys(HotkeyChord toggle,HotkeyChord emergency){
+        var copy=(Settings)MemberwiseClone();
+        copy.Modifiers=toggle.Modifiers;copy.VirtualKey=toggle.Key;
+        copy.EmergencyModifiers=emergency.Modifiers;copy.EmergencyVirtualKey=emergency.Key;
+        return copy;
+    }
     public bool StartWithWindows {get;set;}
     public bool KeepAwake {get;set;}=true;
     public bool AllowVirtualDisplay {get;set;}=true;

@@ -41,7 +41,8 @@ static class Program {
             var app=new System.Windows.Application();
             app.DispatcherUnhandledException+=(_,e)=>{Storage.Log("界面异常",e.Exception.ToString());try{Recovery.RestorePending(true);}catch{}e.Handled=true;MessageBox.Show(e.Exception.Message,"内屏开关");};
             AppDomain.CurrentDomain.UnhandledException+=(_,e)=>Storage.Log("进程异常",e.ExceptionObject.ToString());
-            app.Run(new MainWindow(args.Contains("--smoke-test"),args.Contains("--background")));return 0;
+            int preview=Array.IndexOf(args,"--ui-preview");
+            app.Run(new MainWindow(args.Contains("--smoke-test"),args.Contains("--background"),args.Contains("--smoke-test")&&preview>=0&&preview+1<args.Length?args[preview+1]:null));return 0;
         } catch(Exception e){Storage.Log("启动失败",e.ToString());if(!args.Any(x=>x.StartsWith("--",StringComparison.Ordinal)))MessageBox.Show(e.Message,"内屏开关启动失败");return 1;}
     }
 }

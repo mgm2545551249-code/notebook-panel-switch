@@ -9,6 +9,33 @@ internal static class SelfTests {
         var tests=new List<object>();int failures=0;
         void Test(string name,Action action){try{action();tests.Add(new{项目=name,结果="通过"});}catch(Exception e){failures++;tests.Add(new{项目=name,结果="失败",原因=e.Message});}}
         void Assert(bool ok,string reason){if(!ok)throw new Exception(reason);}
+        Test("旧设置迁移保留普通键并补上默认紧急键",()=>{
+            var old=JsonSerializer.Deserialize<Settings>("{\"Modifiers\":5,\"VirtualKey\":120}",Storage.Json)!;
+            Assert(old.Modifiers==5&&old.VirtualKey==120&&old.EmergencyModifiers==3&&old.EmergencyVirtualKey==0x7A,"旧配置默认值不正确");
+            var saved=old.WithHotkeys(new(7,0x77),new(5,0x78));
+            var read=JsonSerializer.Deserialize<Settings>(JsonSerializer.Serialize(saved,Storage.Json),Storage.Json)!;
+            Assert(read.Modifiers==7&&read.VirtualKey==0x77&&read.EmergencyModifiers==5&&read.EmergencyVirtualKey==0x78&&old.Modifiers==5,"没有独立保存两组快捷键");
+        });
+        Test("两组快捷键可以互换而不丢失注册",()=>{
+            var keys=new Dictionary<int,HotkeyChord>();using var manager=new Hotkeys(keys.Add,id=>keys.Remove(id));
+            HotkeyChord toggle=new(3,0x79),emergency=new(3,0x7A);
+            manager.Apply(toggle,emergency);var oldToggle=manager.ToggleId;var oldEmergency=manager.EmergencyId;
+            manager.Apply(emergency,toggle);
+            Assert(keys.Count==2&&manager.ToggleId==oldEmergency&&manager.EmergencyId==oldToggle,"互换后注册或路由不正确");
+        });
+        Test("重键、系统占用和保存失败均不改变原来的快捷键",()=>{
+            var keys=new Dictionary<int,HotkeyChord>();
+            HotkeyChord toggle=new(3,0x79),emergency=new(3,0x7A),free=new(3,0x7B),blocked=new(3,0x7C);
+            using var manager=new Hotkeys((id,key)=>{if(key==blocked)throw new System.ComponentModel.Win32Exception(1409);keys.Add(id,key);},id=>keys.Remove(id));
+            manager.Apply(toggle,emergency);int oldToggle=manager.ToggleId!.Value,oldEmergency=manager.EmergencyId!.Value;
+            void VerifyRejected(Action change){
+                bool rejected=false;try{change();}catch(ArgumentException){rejected=true;}catch(InvalidOperationException){rejected=true;}catch(System.IO.IOException){rejected=true;}
+                Assert(rejected&&keys.Count==2&&keys[oldToggle]==toggle&&keys[oldEmergency]==emergency&&manager.ToggleId==oldToggle&&manager.EmergencyId==oldEmergency,"拒绝变更时丢失了旧键");
+            }
+            VerifyRejected(()=>manager.Apply(free,free));
+            VerifyRejected(()=>manager.Apply(blocked,free));
+            VerifyRejected(()=>manager.Apply(free,emergency,()=>throw new System.IO.IOException("测试保存失败")));
+        });
         Test("显示结构与原生接口尺寸一致",()=>{Assert(Marshal.SizeOf<DisplayPath>()==72,"路径结构长度错误");Assert(Marshal.SizeOf<DisplayMode>()==64,"模式结构长度错误");});
         var snapshot=DisplayNative.Query();
         Test("恢复布局只移除本工具的虚拟屏，并保留其他显示器",()=>{

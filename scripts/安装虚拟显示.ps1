@@ -1,5 +1,17 @@
-﻿param([switch]$Remove)
+﻿param([switch]$Remove,[switch]$Probe)
 $ErrorActionPreference='Stop'
+function Get-ManagedDisplayDevice {
+    Get-PnpDevice -PresentOnly -Class Display | Where-Object {
+        $ids=(Get-PnpDeviceProperty -InstanceId $_.InstanceId -KeyName DEVPKEY_Device_HardwareIds -ErrorAction SilentlyContinue).Data
+        $ids -contains 'Root\MttVDD'
+    }
+}
+if($Probe){
+    $devices=@(Get-ManagedDisplayDevice)
+    ConvertTo-Json -InputObject @($devices | Select-Object Status,FriendlyName,InstanceId) -Compress
+    if(@($devices | Where-Object Status -eq 'OK').Count -gt 0){exit 0}
+    exit 2
+}
 $taskRoot=Join-Path $env:ProgramData 'PanelSwitch'
 New-Item -ItemType Directory -Force -Path $taskRoot | Out-Null
 Start-Transcript -Path (Join-Path $taskRoot '虚拟显示驱动安装.log') -Append | Out-Null
@@ -10,6 +22,10 @@ try {
         $devices=@(Get-PnpDevice -PresentOnly | Where-Object {$_.InstanceId -like 'ROOT\DISPLAY\*' -or $_.InstanceId -like 'ROOT\MTTVDD\*'})
         foreach($device in $devices){$ids=(Get-PnpDeviceProperty -InstanceId $device.InstanceId -KeyName DEVPKEY_Device_HardwareIds -ErrorAction SilentlyContinue).Data;if($ids -contains 'Root\MttVDD'){& pnputil.exe /remove-device $device.InstanceId;if($LASTEXITCODE -ne 0){throw '移除虚拟显示设备失败。'}}}
         Write-Output '虚拟显示设备已移除。驱动包保留在驱动仓库，不改动其他显示驱动。'
+        exit 0
+    }
+    if(@(Get-ManagedDisplayDevice | Where-Object Status -eq 'OK').Count -gt 0){
+        Write-Output '虚拟显示设备已安装且状态正常，未重复安装。'
         exit 0
     }
     $package=Join-Path $PSScriptRoot 'VirtualDisplayDriver'
@@ -24,7 +40,10 @@ try {
     $store=[Security.Cryptography.X509Certificates.X509Store]::new('TrustedPublisher','LocalMachine')
     $store.Open('ReadWrite');try{$store.Add($signature.SignerCertificate)}finally{$store.Close()}
     & pnputil.exe /add-driver (Join-Path $package 'MttVDD.inf') /install
-    if($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 3010){throw "驱动入库失败，退出码：$LASTEXITCODE"}
+    $driverExit=$LASTEXITCODE
+    if($driverExit -eq 3010){Write-Output '驱动安装需要重启后才能完成。';exit 3010}
+    if($driverExit -notin @(0,259)){throw "驱动入库失败，退出码：$driverExit"}
+    if($driverExit -eq 259){Write-Output '未更新现有设备，将检查是否已有可用设备或是否需要创建设备。'}
     Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
@@ -37,7 +56,7 @@ public static class PanelVirtualDevice {
  [DllImport("setupapi.dll",SetLastError=true)] static extern bool SetupDiCallClassInstaller(uint function,IntPtr list,ref Info info);
  [DllImport("setupapi.dll")] static extern bool SetupDiDestroyDeviceInfoList(IntPtr list);
  [DllImport("newdev.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool UpdateDriverForPlugAndPlayDevices(IntPtr hwnd,string id,string inf,uint flags,out bool reboot);
- public static void Create(string inf) {
+ public static bool Create(string inf) {
    Guid cls=new Guid("4d36e968-e325-11ce-bfc1-08002be10318");IntPtr list=SetupDiCreateDeviceInfoList(ref cls,IntPtr.Zero);
    if(list==new IntPtr(-1))throw new Win32Exception();
    var info=new Info{Size=(uint)Marshal.SizeOf(typeof(Info))};bool registered=false;
@@ -47,13 +66,21 @@ public static class PanelVirtualDevice {
      if(!SetupDiSetDeviceRegistryProperty(list,ref info,1,id,(uint)id.Length))throw new Win32Exception();
      if(!SetupDiCallClassInstaller(0x19,list,ref info))throw new Win32Exception();registered=true;
      bool reboot;if(!UpdateDriverForPlugAndPlayDevices(IntPtr.Zero,"Root\\MttVDD",inf,1,out reboot))throw new Win32Exception();
-     registered=false;
+     registered=false;return reboot;
    } finally {if(registered)SetupDiCallClassInstaller(5,list,ref info);SetupDiDestroyDeviceInfoList(list);}
  }
 }
 '@
-    $existing=@(Get-PnpDevice -PresentOnly | Where-Object {$_.FriendlyName -eq 'Virtual Display Driver'})
-    if($existing.Count -eq 0){[PanelVirtualDevice]::Create((Join-Path $package 'MttVDD.inf'))}
+    $existing=@(Get-ManagedDisplayDevice)
+    if($existing.Count -eq 0){
+        if([PanelVirtualDevice]::Create((Join-Path $package 'MttVDD.inf'))){Write-Output '虚拟设备已创建，重启后生效。';exit 3010}
+    }
+    $ready=$false
+    for($attempt=0;$attempt -lt 5;$attempt++){
+        if(@(Get-ManagedDisplayDevice | Where-Object Status -eq 'OK').Count -gt 0){$ready=$true;break}
+        Start-Sleep -Milliseconds 500
+    }
+    if(-not $ready){throw "虚拟显示设备未就绪（驱动工具返回 $driverExit）。请在设备管理器检查设备状态。"}
     Get-PnpDevice -PresentOnly -Class Display | Format-List Status,FriendlyName,InstanceId
     Write-Output '虚拟显示驱动安装流程已完成。'
     exit 0
